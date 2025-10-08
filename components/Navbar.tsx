@@ -51,7 +51,6 @@ export default function Navbar() {
       {/* 1. Navigation Mobile : Utilise la liste NAV_ITEMS_MOBILE */}
       <MobileNav 
         {...commonProps} 
-        user={user} 
         navItems={NAV_ITEMS_MOBILE}
       />
       

@@ -1,23 +1,19 @@
 "use client";
 
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
-// Importation de usePathname pour l'App Router
 import { useRouter, usePathname } from "next/navigation"; 
-import { createClient, SupabaseClient, User } from "@supabase/supabase-js";
-import { Profile } from "@/types"; // Assurez-vous que ce chemin est correct
-import { getProfile } from "@/services/api"; // Assurez-vous que ce chemin est correct
+import { createBrowserClient } from '@supabase/ssr'
+import { User } from "@supabase/supabase-js";
+import { Profile } from "@/types";
+import { getProfile } from "@/services/api";
 import { Loader2 } from "lucide-react"; 
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
 
 interface AuthContextType {
   user: Profile | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
-  supabase: SupabaseClient;
+  supabase: ReturnType<typeof createBrowserClient>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,82 +24,165 @@ interface AuthProviderProps {
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const router = useRouter();
-  // Récupérer le chemin actuel avec usePathname
   const pathname = usePathname(); 
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
+
+  // Créer le client Supabase avec gestion automatique des cookies
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   useEffect(() => {
     let mounted = true;
+    let redirectTimeout: NodeJS.Timeout;
 
+    const initializeAuth = async () => {
+      try {
+        // Vérifier et rafraîchir la session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        // Si erreur de session, nettoyer et rediriger
+        if (sessionError) {
+          console.error("Session error:", sessionError);
+          await supabase.auth.signOut();
+          setUser(null);
+          setLoading(false);
+          setInitialCheckDone(true);
+          if (pathname !== "/") {
+            router.push("/");
+          }
+          return;
+        }
+        
+        if (session?.user && mounted) {
+          try {
+            // Timeout pour éviter le chargement infini
+            const profilePromise = getProfile(session.user.id);
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+            );
+            
+            const profile = await Promise.race([profilePromise, timeoutPromise]) as Profile;
+            
+            if (mounted) {
+              setUser(profile);
+              setLoading(false);
+              setInitialCheckDone(true);
+              
+              if (pathname === "/") { 
+                redirectTimeout = setTimeout(() => router.push("/dashboard"), 100);
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching profile:", error);
+            // En cas d'erreur, déconnecter proprement
+            await supabase.auth.signOut();
+            if (mounted) {
+              setUser(null);
+              setLoading(false);
+              setInitialCheckDone(true);
+              router.push("/");
+            }
+          }
+        } else if (mounted) {
+          setUser(null);
+          setLoading(false);
+          setInitialCheckDone(true);
+          
+          if (pathname !== "/" && !pathname.startsWith("/_next")) {
+            redirectTimeout = setTimeout(() => router.push("/"), 100);
+          }
+        }
+      } catch (error) {
+        console.error("Error during auth initialization:", error);
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+          setInitialCheckDone(true);
+        }
+      }
+    };
+
+    initializeAuth();
+
+    // Écouter les changements d'authentification
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (!mounted) return;
+      async (event, session) => {
+        if (!mounted || !initialCheckDone) return;
+        
+        console.log('Auth event:', event);
+        
+        // Gérer le rafraîchissement du token
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('Token refreshed successfully');
+          return; // Ne pas recharger le profil
+        }
+        
+        // Gérer la déconnexion
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          router.push("/");
+          return;
+        }
         
         const supabaseUser: User | null = session?.user ?? null;
         
-        if (supabaseUser) {
+        if (supabaseUser && event === 'SIGNED_IN') {
           try {
-            // Utilisateur connecté
             const profile = await getProfile(supabaseUser.id);
             setUser(profile);
             
-            // Rediriger vers /dashboard si l'utilisateur est sur la page de login ("/")
             if (pathname === "/") { 
-              router.push("/dashboard"); 
+              redirectTimeout = setTimeout(() => router.push("/dashboard"), 100);
             }
           } catch (error) {
             console.error("Error fetching profile:", error);
             setUser(null);
-            // Déconnexion forcée si le profil n'a pas pu être chargé
-            await supabase.auth.signOut(); 
+            await supabase.auth.signOut();
             router.push("/");
           }
-        } else {
-          // Utilisateur déconnecté ou session expirée
+        } else if (!supabaseUser && event !== 'INITIAL_SESSION') {
           setUser(null);
-          
-          // Rediriger vers la page de login ("/") si l'utilisateur est sur une page protégée
           if (pathname !== "/") {
             router.push("/"); 
           }
         }
-        
-        // S'assurer que loading est désactivé après le premier check
-        if (loading) {
-          setLoading(false);
-        }
       }
     );
 
-    // Vérification initiale pour gérer le premier chargement
-    const initialCheck = async () => {
-      try {
-        await supabase.auth.getSession();
-        // Le listener onAuthStateChange va prendre le relai et définir l'état
-      } catch (error) {
-        console.error("Error during initial session check:", error);
-        if (mounted) setLoading(false);
-      }
-    }
-
-    initialCheck();
-
     return () => {
       mounted = false;
+      if (redirectTimeout) clearTimeout(redirectTimeout);
       subscription.unsubscribe();
     };
-  }, [router, pathname]); // Ajout de pathname et router aux dépendances
+  }, [router, pathname, supabase]);
 
   const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ 
+        email, 
+        password 
+      });
+      if (error) throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUser(null);
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      setUser(null);
+      router.push("/");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const value = {
@@ -114,11 +193,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     supabase,
   };
 
-  // Loader moderne lorsque l'application charge l'état initial
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <Loader2 className="animate-spin h-10 w-10 text-blue-600" />
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <Loader2 className="animate-spin h-10 w-10 text-blue-600 dark:text-blue-400 mx-auto mb-4" />
+          <p className="text-sm text-gray-600 dark:text-gray-400">Chargement...</p>
+        </div>
       </div>
     );
   }

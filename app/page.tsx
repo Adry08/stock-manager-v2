@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2, Mail, Lock, Eye, EyeOff } from "lucide-react";
 
@@ -43,12 +43,21 @@ function Button({
 }
 
 export default function LoginPage() {
-  const { login, loading, user } = useAuth();
+  const { user, login, loading } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Redirection automatique si connecté
+  useEffect(() => {
+    if (user) {
+      console.log("[LoginPage] Redirection vers dashboard via window.location");
+      window.location.href = "/dashboard"; // redirection garantie
+    }
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,18 +72,12 @@ export default function LoginPage() {
     }
   };
 
-  if (loading) {
+  // Spinner pendant le chargement ou redirection
+  if (loading || user) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
-        <Loader2 className="animate-spin h-8 w-8 text-gray-600 dark:text-gray-400" />
-      </div>
-    );
-  }
-
-  if (user) {
-    return (
-      <div className="flex items-center justify-center h-screen text-lg font-medium bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-        Déjà connecté 🚀 Redirection en cours...
+      <div className="flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+        <Loader2 className="animate-spin h-10 w-10 text-blue-600 dark:text-blue-400" />
+        {user && <p className="mt-2 text-gray-700 dark:text-gray-300">Redirection en cours...</p>}
       </div>
     );
   }

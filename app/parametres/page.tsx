@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { Moon, Sun, RefreshCw, TrendingUp, Calendar, Check } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
+
 
 type CurrencyType = "MGA" | "USD" | "EUR" | "GBP";
 
@@ -19,10 +19,7 @@ interface ExchangeRate {
 }
 
 // Initialiser Supabase
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from "@/lib/supabaseClient";
 
 // Hook pour utiliser le ThemeContext
 const useTheme = () => {

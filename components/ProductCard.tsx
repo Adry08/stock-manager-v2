@@ -1,11 +1,10 @@
-// components/ProductCard.tsx
 "use client";
 
 import { Currency, Product } from "@/types";
 import { Card, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2, Loader2, Package } from "lucide-react";
+import { Edit, Trash2, Loader2, Package, UserCircle } from "lucide-react";
 import Image from "next/image";
 import { useState, useEffect } from "react";
 import { convertToDefaultCurrency, formatPrice } from "@/services/currency";
@@ -14,20 +13,26 @@ interface ProductCardProps {
   product: Product;
   onEdit: (product: Product) => void;
   onDelete: (id: string) => void;
+  onClientClick?: (product: Product) => void;
   isDeleting: boolean;
   defaultCurrency: string;
   exchangeRates?: Record<string, number>;
+  hasClient?: boolean;
 }
 
 export default function ProductCard({
   product,
   onEdit,
   onDelete,
+  onClientClick,
   isDeleting,
   defaultCurrency,
   exchangeRates,
+  hasClient = false,
 }: ProductCardProps) {
   const isSold = product.status === "vendu";
+  const isDelivery = product.status === "livraison";
+  const showClientIcon = isDelivery || isSold;
   const quantity = product.quantity || 1;
 
   const [convertedPrices, setConvertedPrices] = useState({
@@ -38,9 +43,9 @@ export default function ProductCard({
 
   useEffect(() => {
     const convertPrices = async () => {
-      try {
-        setConvertedPrices((prev) => ({ ...prev, loading: true }));
+      setConvertedPrices((prev) => ({ ...prev, loading: true }));
 
+      try {
         const purchasePriceConverted = await convertToDefaultCurrency(
           product.purchase_price || 0,
           product.currency as Currency,
@@ -49,19 +54,20 @@ export default function ProductCard({
         );
 
         const sellingPrice =
-          product.selling_price ?? product.estimated_selling_price ?? 0;
+          isDelivery
+            ? 0
+            : product.selling_price ?? product.estimated_selling_price ?? 0;
 
         setConvertedPrices({
           purchasePrice: purchasePriceConverted,
-          sellingPrice: sellingPrice,
+          sellingPrice,
           loading: false,
         });
       } catch (error) {
         console.error("Erreur lors de la conversion des prix:", error);
         setConvertedPrices({
           purchasePrice: product.purchase_price || 0,
-          sellingPrice:
-            product.selling_price ?? product.estimated_selling_price ?? 0,
+          sellingPrice: isDelivery ? 0 : product.selling_price ?? product.estimated_selling_price ?? 0,
           loading: false,
         });
       }
@@ -75,167 +81,154 @@ export default function ProductCard({
     product.estimated_selling_price,
     defaultCurrency,
     exchangeRates,
+    isDelivery,
   ]);
 
   return (
-    <Card
-      className={`overflow-hidden rounded-xl shadow-md transition-transform hover:scale-[1.02] bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 ${
-        isSold ? "opacity-70" : ""
-      }`}
-    >
-      {/* Image ou placeholder */}
-      <div className="relative h-32 sm:h-40 bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+    <Card className={`flex flex-col h-full overflow-hidden rounded-2xl shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 ${isSold ? "opacity-90" : ""}`}>
+      
+      {/* Image et badges */}
+      <div className="relative h-44 sm:h-52 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center overflow-hidden rounded-t-2xl">
         {product.image_url ? (
           <Image
             src={product.image_url}
             alt={product.name}
-            className="w-full h-full object-cover"
-            width={300}
-            height={200}
+            className="w-full h-full object-cover transition-transform duration-300 hover:scale-110"
+            width={400}
+            height={300}
           />
         ) : (
-          <Package className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+          <Package className="w-12 h-12 text-gray-400 dark:text-gray-500" />
         )}
 
-        {/* Badge quantité */}
-        <Badge
-          variant="secondary"
-          className="absolute top-2 left-2 bg-blue-500 hover:bg-blue-600 text-white font-bold"
-        >
+        <Badge className="absolute top-3 left-3 bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg px-3 py-1">
           × {quantity}
         </Badge>
 
-        {/* Badge statut */}
         <Badge
-          className={`absolute top-2 right-2 ${
+          className={`absolute top-3 right-3 font-semibold shadow-lg px-3 py-1 ${
             product.status === "stock"
-              ? "bg-green-500 hover:bg-green-600"
+              ? "bg-green-600 hover:bg-green-700"
               : product.status === "livraison"
-              ? "bg-yellow-500 hover:bg-yellow-600"
-              : "bg-red-500 hover:bg-red-600"
+              ? "bg-amber-500 hover:bg-amber-600"
+              : "bg-red-600 hover:bg-red-700"
           }`}
         >
-          {product.status === "stock"
-            ? "Stock"
-            : product.status === "livraison"
-            ? "Livraison"
-            : "Vendu"}
+          {product.status === "stock" ? "En Stock" : product.status === "livraison" ? "Livraison" : "Vendu"}
         </Badge>
+
+        {/* Bouton client : toujours sur l'image, bas à droite */}
+        {showClientIcon && onClientClick && (
+          <button
+            onClick={() => onClientClick(product)}
+            className={`absolute bottom-3 right-3 p-2 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 ${
+              hasClient
+                ? "bg-green-500 hover:bg-green-600 text-white"
+                : "bg-white hover:bg-gray-100 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white"
+            }`}
+            title={hasClient ? "Voir/Modifier le client" : "Ajouter un client"}
+          >
+            <UserCircle className="w-6 h-6" />
+          </button>
+        )}
       </div>
 
-      <div className="p-3 sm:p-4 flex flex-col justify-between text-sm space-y-1">
-        {/* Nom du produit */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-md sm:text-lg font-semibold truncate flex-1 mr-2 text-gray-900 dark:text-gray-100">
-            {product.name}
-          </h3>
-        </div>
+      {/* Contenu du produit */}
+      <div className="p-4 flex-1 flex flex-col space-y-3">
+        <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
+          {product.name}
+        </h3>
 
-        {/* Description */}
         <p
           title={product.description || "Aucune description"}
-          className="text-gray-500 dark:text-gray-400 text-xs truncate h-4"
+          className="text-gray-600 dark:text-gray-400 text-sm line-clamp-2 min-h-[2.5rem]"
         >
-          {product.description || <span>&nbsp;</span>}
+          {product.description || "Aucune description"}
         </p>
 
-        {/* Prix d'achat (devise originale) */}
-        <p className="text-gray-500 dark:text-gray-400">
-          Achat: {formatPrice(product.purchase_price || 0, product.currency as Currency)}
-        </p>
-
-        {/* Prix d'achat converti */}
-        {product.currency !== defaultCurrency && (
-          <p className="text-gray-500 dark:text-gray-400 font-medium">
-            Achat ({defaultCurrency}):{" "}
-            {convertedPrices.loading ? (
-              <span className="inline-flex items-center">
-                <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                Conversion...
-              </span>
-            ) : (
-              formatPrice(convertedPrices.purchasePrice, defaultCurrency as Currency)
-            )}
-          </p>
-        )}
-
-        {/* Prix de vente */}
-        <p className="text-indigo-600 dark:text-indigo-400 font-semibold">
-          {isSold ? "Vendu" : "Vente estimée"} ({defaultCurrency}):{" "}
-          {formatPrice(convertedPrices.sellingPrice, defaultCurrency as Currency)}
-        </p>
-
-        {/* Prix total */}
-        {quantity > 1 && (
-          <div className="border-t dark:border-gray-700 pt-2 mt-2">
-            <p className="text-gray-600 dark:text-gray-400 text-xs">
-              Achat total:{" "}
-              {formatPrice(
-                convertedPrices.purchasePrice * quantity,
-                defaultCurrency as Currency
-              )}
-            </p>
-            <p className="text-indigo-600 dark:text-indigo-400 font-medium text-xs">
-              Vente totale:{" "}
-              {formatPrice(
-                convertedPrices.sellingPrice * quantity,
-                defaultCurrency as Currency
-              )}
-            </p>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mt-1">
-          <Badge
-            className={`${
-              product.status === "stock"
-                ? "bg-green-500 hover:bg-green-600"
-                : product.status === "livraison"
-                ? "bg-yellow-500 hover:bg-yellow-600"
-                : "bg-gray-500 hover:bg-gray-600"
-            }`}
-          >
-            {product.status.charAt(0).toUpperCase() + product.status.slice(1)}
-          </Badge>
-
-          {/* Profit si vendu */}
-          {isSold && (
-            <span className="text-xs font-medium text-green-600 dark:text-green-400">
-              Profit:{" "}
-              {formatPrice(
-                (convertedPrices.sellingPrice - convertedPrices.purchasePrice) *
-                  quantity,
-                defaultCurrency as Currency
-              )}
+        <div className="border-t dark:border-gray-700 pt-3 space-y-2 flex-1">
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-gray-500 dark:text-gray-400">Prix d'achat:</span>
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              {formatPrice(product.purchase_price || 0, product.currency as Currency)}
             </span>
+          </div>
+
+          {product.currency !== defaultCurrency && (
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Achat ({defaultCurrency}):
+              </span>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {convertedPrices.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : formatPrice(convertedPrices.purchasePrice, defaultCurrency as Currency)}
+              </span>
+            </div>
+          )}
+
+          {isSold && (
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Prix vendu:</span>
+              <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                {convertedPrices.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : formatPrice(convertedPrices.sellingPrice, defaultCurrency as Currency)}
+              </span>
+            </div>
+          )}
+
+          {quantity > 1 && (
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2 mt-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-gray-600 dark:text-gray-400">Total achat:</span>
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {formatPrice(convertedPrices.purchasePrice * quantity, defaultCurrency as Currency)}
+                </span>
+              </div>
+              {isSold && (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">Total vente:</span>
+                  <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                    {formatPrice(convertedPrices.sellingPrice * quantity, defaultCurrency as Currency)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isSold && (
+            <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 mt-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-medium text-green-700 dark:text-green-400">Profit total:</span>
+                <span className="text-lg font-bold text-green-600 dark:text-green-400">
+                  {formatPrice((convertedPrices.sellingPrice - convertedPrices.purchasePrice) * quantity, defaultCurrency as Currency)}
+                </span>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      <CardFooter className="pt-2 border-t dark:border-gray-700 flex justify-end gap-2 bg-gray-50 dark:bg-gray-800">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onEdit(product)}
-          disabled={isDeleting}
-          className="rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900 hover:text-indigo-600 dark:hover:text-indigo-400 transition"
-        >
-          <Edit className="w-5 h-5" />
-        </Button>
+      {/* Footer fixe en bas avec edit/delete */}
+      <CardFooter className="p-4 flex justify-between items-center mt-auto border-t dark:border-gray-700">
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onEdit(product)}
+            disabled={isDeleting}
+            className="rounded-full hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
+          >
+            <Edit className="w-5 h-5" />
+          </Button>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onDelete(product.id)}
-          disabled={isDeleting}
-          className="rounded-full hover:bg-red-100 dark:hover:bg-red-900 hover:text-red-600 dark:hover:text-red-400 transition"
-        >
-          {isDeleting ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Trash2 className="w-5 h-5" />
-          )}
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onDelete(product.id)}
+            disabled={isDeleting}
+            className="rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-all"
+          >
+            {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   );

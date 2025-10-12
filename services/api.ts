@@ -1,18 +1,10 @@
 // services/api.ts
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Product, Movement, Settings, Profile, DeletedProduct, ExchangeRate } from '@/types';
 
 // ----------------------
 // Supabase Client
 // ----------------------
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Supabase URL ou Key manquant dans les variables d\'environnement');
-}
-
-export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
+import { supabase } from "@/lib/supabaseClient"; 
 
 // ----------------------
 // Products API
@@ -78,6 +70,9 @@ export async function deleteProduct(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// ----------------------
+// Deleted Products
+// ----------------------
 export async function getDeletedProducts(): Promise<DeletedProduct[]> {
   const { data, error } = await supabase
     .from('deleted_products')
@@ -88,7 +83,7 @@ export async function getDeletedProducts(): Promise<DeletedProduct[]> {
 }
 
 // ----------------------
-// Movements API (lecture seule)
+// Movements API
 // ----------------------
 export async function getMovements(page: number = 0, limit: number = 20): Promise<Movement[]> {
   const start = page * limit;
@@ -127,11 +122,7 @@ export async function getMovementsByUser(userId: string): Promise<Movement[]> {
 // ----------------------
 export async function getSettings(userId?: string): Promise<Settings> {
   let query = supabase.from('settings').select('*');
-  
-  if (userId) {
-    query = query.eq('user_id', userId);
-  }
-  
+  if (userId) query = query.eq('user_id', userId);
   const { data, error } = await query.single();
   if (error) throw new Error(error.message);
   return data;
@@ -214,10 +205,7 @@ export async function updateExchangeRates(
 ): Promise<ExchangeRate> {
   const { data, error } = await supabase
     .from('exchange_rates')
-    .update({ 
-      rates, 
-      updated_at: new Date().toISOString() 
-    })
+    .update({ rates, updated_at: new Date().toISOString() })
     .eq('base_currency', 'EUR')
     .select()
     .single();

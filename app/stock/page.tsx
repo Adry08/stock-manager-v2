@@ -203,7 +203,7 @@ export default function StockPage() {
       loadData(); 
       closeModal();
     } catch (error) {
-      toast.error("Échec de l'ajout du produit.");
+      toast.error("Échec de l'ajout du produit : " + error);
     }
   };
 
@@ -217,7 +217,7 @@ export default function StockPage() {
       loadData();
       closeModal();
     } catch (error) {
-      toast.error("Échec de la modification.");
+      toast.error("Échec de la modification : " + error);
     }
   };
 

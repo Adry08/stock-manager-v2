@@ -53,7 +53,7 @@ export default function DashboardPage() {
       setProducts(productsData);
       toast.success("Données mises à jour");
     } catch (error) {
-      toast.error("Erreur lors du rafraîchissement");
+      toast.error("Erreur lors du rafraîchissement : " + error);
     } finally {
       setIsRefreshing(false);
     }
@@ -75,7 +75,7 @@ export default function DashboardPage() {
         const productsData = await getProducts(supabase);
         setProducts(productsData);
       } catch (error) {
-        toast.error("Échec du chargement de l'inventaire.");
+        toast.error("Échec du chargement de l'inventaire : " + error);
       } finally {
         setLoading(false);
       }
@@ -243,7 +243,7 @@ export default function DashboardPage() {
       closeModal();
       setTimeout(() => refreshData(), 500);
     } catch (error) {
-      toast.error("Échec de la sauvegarde du produit.");
+      toast.error("Échec de la sauvegarde du produit. : " + error);
     }
   };
   
@@ -256,7 +256,7 @@ export default function DashboardPage() {
       toast.success("Produit supprimé !");
       setTimeout(() => refreshData(), 500);
     } catch (error) {
-      toast.error("Échec de la suppression.");
+      toast.error("Échec de la suppression. : " + error);
     } finally {
       setDeletingProductId(null);
     }

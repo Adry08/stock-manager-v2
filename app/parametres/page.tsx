@@ -178,6 +178,8 @@ export default function ParametresPage() {
       setAlert({ message: "Paramètres enregistrés avec succès !", type: 'success' });
     } catch (error) {
       setAlert({ message: "Erreur lors de l'enregistrement", type: 'error' });
+      console.log(error);
+      
     } finally {
       setIsSaving(false);
     }

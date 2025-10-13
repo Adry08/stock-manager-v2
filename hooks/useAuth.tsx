@@ -57,6 +57,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUser(profile);
           console.log("[AuthProvider] Profil mis à jour :", profile);
         } catch (err) {
+          console.log(err);
+          
           setUser(null);
         }
       } else {

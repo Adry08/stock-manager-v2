@@ -1,6 +1,22 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+CREATE TABLE public.clients (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  client_name text NOT NULL,
+  contact_number text NOT NULL,
+  delivery_address text NOT NULL,
+  delivery_date date NOT NULL,
+  delivery_time time without time zone NOT NULL,
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  CONSTRAINT clients_pkey PRIMARY KEY (id),
+  CONSTRAINT clients_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT clients_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
+);
 CREATE TABLE public.deleted_products (
   id uuid NOT NULL,
   name text NOT NULL,
@@ -21,7 +37,7 @@ CREATE TABLE public.deleted_products (
 );
 CREATE TABLE public.exchange_rates (
   id integer NOT NULL DEFAULT nextval('exchange_rates_id_seq'::regclass),
-  base_currency text NOT NULL,
+  base_currency text NOT NULL UNIQUE,
   rates jsonb NOT NULL,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),

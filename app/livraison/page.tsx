@@ -170,7 +170,7 @@ export default function LivraisonPage() {
       loadData();
       closeModal();
     } catch (error) {
-      toast.error("Échec de la modification.");
+      toast.error("Échec de la modification : " + error);
     }
   };
 

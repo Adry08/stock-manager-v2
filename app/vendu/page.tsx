@@ -153,8 +153,8 @@ export default function VenduPage() {
       toast.success("Produit modifié !");
       loadData();
       closeModal();
-    } catch (error) {
-      toast.error("Échec de la modification.");
+    } catch (e) {
+      toast.error("Échec de la modification : " + e);
     }
   };
 

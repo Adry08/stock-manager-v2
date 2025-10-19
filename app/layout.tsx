@@ -3,7 +3,7 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/hooks/useAuth";
-import Navbar from "@/components/Navbar";
+import { Navbar } from "@/components/Navbar";
 import Providers from "./providers";
 import { Toaster } from "sonner";
 
@@ -42,20 +42,30 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="fr" suppressHydrationWarning>
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
         <link rel="apple-touch-icon" href="/icons/icon-152x152.png" />
       </head>
       <body className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
         <Providers>
           <AuthProvider>
             <Navbar />
-            <main>{children}</main>
+            {/* */}
+            <main className="pb-[calc(80px+env(safe-area-inset-bottom))] md:pb-0">
+              {children}
+            </main>
             <Toaster position="top-right" richColors />
           </AuthProvider>
         </Providers>

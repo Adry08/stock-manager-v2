@@ -1,4 +1,4 @@
-// app/stock/page.tsx
+// app/stock/page.tsx - Version améliorée
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -79,7 +79,7 @@ export default function StockPage() {
   const [sortBy, setSortBy] = useState<SortableColumn>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20; // Pagination pour grands volumes
+  const itemsPerPage = 20;
 
   const defaultCurrency = (settings?.default_currency || 'MGA') as Currency;
   
@@ -89,15 +89,6 @@ export default function StockPage() {
     }
     return settings.exchange_rates as Record<Currency, number>;
   }, [settings?.exchange_rates]);
-
-  // Fonction de conversion
-  const convertToDefaultCurrency = useCallback((amount: number, fromCurrency: Currency): number => {
-    if (fromCurrency === defaultCurrency) return amount;
-    const rateFrom = exchangeRates[fromCurrency] || 1;
-    const rateTo = exchangeRates[defaultCurrency] || 1;
-    const amountInEUR = amount / rateFrom;
-    return amountInEUR * rateTo;
-  }, [defaultCurrency, exchangeRates]);
 
   // Filtrage et tri
   const stockProducts = useMemo(() => {
@@ -142,7 +133,6 @@ export default function StockPage() {
     const totalProducts = stockProducts.length;
     const lowStockCount = stockProducts.filter(p => p.quantity < LOW_STOCK_THRESHOLD).length;
     
-    // Le prix estimé est déjà en MGA, pas besoin de conversion
     const totalValue = stockProducts.reduce((sum, p) => {
       const price = p.estimated_selling_price || 0;
       const qty = p.quantity || 0;
@@ -188,7 +178,7 @@ export default function StockPage() {
   }, [loadData]);
 
   useEffect(() => {
-    setCurrentPage(1); // Reset page lors du changement de recherche
+    setCurrentPage(1);
   }, [searchTerm]);
 
   const handleCreate = async (values: ProductFormData) => {
@@ -269,16 +259,6 @@ export default function StockPage() {
     }).format(value);
   };
 
-  const getCurrencySymbol = (curr: Currency) => {
-    const symbols: Record<Currency, string> = {
-      MGA: 'Ar',
-      USD: '$',
-      EUR: '€',
-      GBP: '£',
-    };
-    return symbols[curr] || curr;
-  };
-
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -291,17 +271,17 @@ export default function StockPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
-      <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6 pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
+      <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Header */}
+        {/* Header amélioré */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-xl shadow-md">
-              <Warehouse className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-4 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-xl">
+              <Warehouse className="w-10 h-10 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
                 Inventaire Stock
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
@@ -311,7 +291,7 @@ export default function StockPage() {
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats Cards améliorées */}
         {initialLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCardSkeleton />
@@ -321,78 +301,78 @@ export default function StockPage() {
           </div>
         ) : stockProducts.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-indigo-100 dark:border-indigo-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Total Produits
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalProducts}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     articles différents
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-lg shadow-sm">
-                  <Package className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                <div className="p-4 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-xl shadow-md">
+                  <Package className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Quantité Totale
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalQuantity}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     unités en stock
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-lg shadow-sm">
-                  <Warehouse className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <div className="p-4 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-xl shadow-md">
+                  <Warehouse className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-green-100 dark:border-green-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Valeur Estimée
                   </p>
-                  <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white truncate">
+                  <p className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white truncate">
                     {formatCurrency(stats.totalValue)} Ar
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     prix estimé total en MGA
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-lg shadow-sm flex-shrink-0">
-                  <TrendingUp className="w-6 h-6 text-green-600 dark:text-green-400" />
+                <div className="p-4 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-xl shadow-md flex-shrink-0">
+                  <TrendingUp className="w-7 h-7 text-green-600 dark:text-green-400" />
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-red-100 dark:border-red-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Stock Critique
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.lowStockCount}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     produits à réapprovisionner
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-red-800/30 rounded-lg shadow-sm">
-                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                <div className="p-4 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-red-800/30 rounded-xl shadow-md">
+                  <AlertTriangle className="w-7 h-7 text-red-600 dark:text-red-400" />
                 </div>
               </div>
             </div>
@@ -400,7 +380,7 @@ export default function StockPage() {
         ) : null}
 
         {/* Barre de Contrôle */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
           <div className="relative w-full md:w-96">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -415,7 +395,7 @@ export default function StockPage() {
           
           <button
             onClick={() => openModal()}
-            className="flex items-center bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg hover:from-indigo-700 hover:to-indigo-800 transition-all active:scale-[0.98] disabled:opacity-50 text-sm font-semibold whitespace-nowrap"
+            className="flex items-center bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 text-sm font-bold whitespace-nowrap"
             disabled={initialLoading || !!dataError} 
           >
             <Plus className="w-5 h-5 mr-2" />
@@ -424,7 +404,7 @@ export default function StockPage() {
         </div>
 
         {initialLoading ? (
-          <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-lg rounded-xl border border-gray-100 dark:border-gray-700">
+          <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>
@@ -442,7 +422,7 @@ export default function StockPage() {
             </table>
           </div>
         ) : dataError ? (
-          <div className="text-center py-12 bg-red-50 dark:bg-red-900/20 rounded-xl shadow-lg border border-red-200 dark:border-red-800">
+          <div className="text-center py-12 bg-red-50 dark:bg-red-900/20 rounded-2xl shadow-xl border border-red-200 dark:border-red-800">
             <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-red-700 dark:text-red-400 mb-2">Erreur de Chargement</h2>
             <p className="text-red-500 dark:text-red-300 mb-6">{dataError}</p>
@@ -454,32 +434,34 @@ export default function StockPage() {
             </button>
           </div>
         ) : stockProducts.length === 0 && searchTerm === '' ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
-            <Warehouse className="w-16 h-16 text-indigo-400 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Stock vide</h2>
+          <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+            <div className="p-6 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6 shadow-xl">
+              <Warehouse className="w-16 h-16 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <h2 className="text-3xl font-bold text-gray-700 dark:text-gray-300 mb-2">Stock vide</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6">Ajoutez votre premier produit en stock pour commencer.</p>
             <button
               onClick={() => openModal()}
-              className="inline-flex items-center bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-md"
+              className="inline-flex items-center bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-colors shadow-md"
             >
               <Plus className="w-5 h-5 mr-2" />
               Ajouter un produit
             </button>
           </div>
         ) : stockProducts.length === 0 && searchTerm !== '' ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
             <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Aucun produit trouvé</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6">Vérifiez l'orthographe ou essayez un autre terme de recherche.</p>
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-lg rounded-xl border border-gray-100 dark:border-gray-700">
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-900">
+                <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
                   <tr>
                     <th 
-                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      className="px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                       onClick={() => handleSort('name')}
                     >
                       <div className="flex items-center">
@@ -489,7 +471,7 @@ export default function StockPage() {
                     </th>
 
                     <th 
-                      className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      className="px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                       onClick={() => handleSort('quantity')}
                     >
                       <div className="flex items-center justify-end">
@@ -499,7 +481,7 @@ export default function StockPage() {
                     </th>
                     
                     <th 
-                      className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      className="px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                       onClick={() => handleSort('estimated_selling_price')}
                     >
                       <div className="flex items-center justify-end">
@@ -508,17 +490,17 @@ export default function StockPage() {
                       </div>
                     </th>
                     
-                    <th className="relative px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="relative px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {paginatedProducts.map((product) => (
-                    <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                    <tr key={product.id} className="hover:bg-gradient-to-r hover:from-indigo-50 hover:to-purple-50 dark:hover:from-gray-700/50 dark:hover:to-gray-700/50 transition-colors">
                       <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
                         <div className="max-w-xs">
-                          <div className="font-semibold truncate">{product.name}</div>
+                          <div className="font-bold truncate">{product.name}</div>
                           {product.description && (
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">
                               {product.description}
@@ -529,31 +511,31 @@ export default function StockPage() {
 
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                         <span 
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
+                          className={`px-4 py-2 inline-flex text-xs font-bold rounded-full shadow-sm
                           ${product.quantity < LOW_STOCK_THRESHOLD 
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' 
+                            ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-800 dark:from-red-900/30 dark:to-red-800/30 dark:text-red-400' 
                             : product.quantity < LOW_STOCK_THRESHOLD * 2
-                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                            : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}
+                            ? 'bg-gradient-to-r from-yellow-100 to-yellow-200 text-yellow-800 dark:from-yellow-900/30 dark:to-yellow-800/30 dark:text-yellow-400'
+                            : 'bg-gradient-to-r from-green-100 to-green-200 text-green-800 dark:from-green-900/30 dark:to-green-800/30 dark:text-green-400'}`}
                         >
                           {product.quantity}
                         </span>
                       </td>
                       
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300 text-right font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300 text-right font-bold">
                         {product.estimated_selling_price?.toLocaleString() || 'N/A'} Ar
                       </td>
                       
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button 
                           onClick={() => openModal(product)} 
-                          className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-4 transition-colors font-medium"
+                          className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-4 transition-colors font-bold hover:underline"
                         >
                           Modifier
                         </button>
                         <button 
                           onClick={() => handleDelete(product.id)} 
-                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors font-medium"
+                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors font-bold hover:underline"
                           disabled={deletingId === product.id}
                         >
                           {deletingId === product.id ? 'Suppr...' : 'Supprimer'}
@@ -567,9 +549,9 @@ export default function StockPage() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+              <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
                 <div className="text-sm text-gray-700 dark:text-gray-300">
-                  Page <span className="font-semibold">{currentPage}</span> sur <span className="font-semibold">{totalPages}</span>
+                  Page <span className="font-bold">{currentPage}</span> sur <span className="font-bold">{totalPages}</span>
                   <span className="ml-2 text-gray-500 dark:text-gray-400">
                     ({paginatedProducts.length} sur {stockProducts.length} produits)
                   </span>
@@ -579,12 +561,11 @@ export default function StockPage() {
                   <button
                     onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                     disabled={currentPage === 1}
-                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
                   >
                     Précédent
                   </button>
                   
-                  {/* Pages numbers */}
                   <div className="hidden sm:flex gap-1">
                     {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                       let pageNum;
@@ -602,9 +583,9 @@ export default function StockPage() {
                         <button
                           key={pageNum}
                           onClick={() => setCurrentPage(pageNum)}
-                          className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                          className={`px-4 py-2 rounded-lg font-bold transition-all shadow-md ${
                             currentPage === pageNum
-                              ? 'bg-indigo-600 text-white'
+                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white scale-105'
                               : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                         >
@@ -617,7 +598,7 @@ export default function StockPage() {
                   <button
                     onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
                   >
                     Suivant
                   </button>

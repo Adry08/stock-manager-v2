@@ -3,12 +3,11 @@
 
 import Link from "next/link";
 import { LogOut, Settings } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import clsx from "clsx";
 import type { NavItem } from "@/config/nav";
-import { useTheme } from "@/contexts/ThemeContext";
+import { getPageColors } from "@/config/nav";
 import { useEffect, useState, useRef } from "react";
-import tinycolor from "tinycolor2";
 
 interface MobileNavProps {
   logout: () => void;
@@ -17,143 +16,158 @@ interface MobileNavProps {
   navItems: NavItem[];
 }
 
-const hrefToPage = {
-  "/dashboard": "dashboard",
-  "/stock": "stock",
-  "/livraison": "livraison",
-  "/vendu": "vendu",
-  "/historique": "historique",
-  "/parametres": "parametres",
-} as const;
-
 export function MobileNav({ logout, pathname, username, navItems }: MobileNavProps) {
-  const { getPageColors, setCurrentPage } = useTheme();
-  // Ajout de 'opacity' à l'état initial pour gérer l'affichage/disparition
-  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, color: '#3b82f6', opacity: 0 });
+  const [indicatorStyle, setIndicatorStyle] = useState({
+    left: 0,
+    width: 0,
+    opacity: 0,
+  });
   const navRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLAnchorElement | null)[]>([]);
 
-  const currentPage = (hrefToPage[pathname as keyof typeof hrefToPage] || "dashboard") as any;
-  const colors = getPageColors(currentPage);
+  const colors = getPageColors(pathname);
 
   useEffect(() => {
-    setCurrentPage(currentPage);
-  }, [pathname, currentPage, setCurrentPage]);
-
-  // Convertir une classe Tailwind en code HEX
-  const tailwindColorToHex = (className: string = 'bg-blue-600') => {
-    const colorMap: Record<string, string> = {
-      'bg-indigo-600': '#4f46e5',
-      'bg-blue-600': '#2563eb',
-      'bg-orange-600': '#ea580c',
-      'bg-green-600': '#16a34a',
-      'bg-purple-600': '#9333ea',
-      'bg-gray-600': '#4b5563',
-    };
-    return colorMap[className] || '#2563eb';
-  };
-  
-  // Ce useEffect gère maintenant tous les cas de figure
-  useEffect(() => {
-    const activeIndex = navItems.findIndex(item => item.href === pathname);
+    const activeIndex = navItems.findIndex((item) => item.href === pathname);
     const activeItemEl = itemRefs.current[activeIndex];
-    
-    // Si une icône est active dans la barre
+
     if (activeIndex !== -1 && activeItemEl && navRef.current) {
       const navRect = navRef.current.getBoundingClientRect();
       const itemRect = activeItemEl.getBoundingClientRect();
-      
-      // On récupère la couleur directement à partir de la page active
-      const activePage = (hrefToPage[pathname as keyof typeof hrefToPage] || "dashboard") as any;
-      const pageColors = getPageColors(activePage);
-      const newColor = tailwindColorToHex(pageColors?.primary);
 
       setIndicatorStyle({
+        // CORRIGÉ : On utilise la position left de l'élément, pas son centre
         left: itemRect.left - navRect.left,
         width: itemRect.width,
-        color: newColor,
-        opacity: 1, // On le rend visible
+        opacity: 1,
       });
-    } else { // Si aucune icône n'est active (ex: /parametres)
-      setIndicatorStyle(prevStyle => ({
+    } else {
+      setIndicatorStyle((prevStyle) => ({
         ...prevStyle,
-        opacity: 0, // On le rend invisible
+        opacity: 0,
       }));
     }
-  }, [pathname, navItems, getPageColors]);
+  }, [pathname, navItems]);
 
+  // Convertir la couleur Tailwind en style inline pour dark mode
+  const getBackgroundColor = () => {
+    const colorMap: Record<string, { light: string; dark: string }> = {
+      "bg-indigo-600": { light: "#4f46e5", dark: "#6366f1" },
+      "bg-blue-600": { light: "#2563eb", dark: "#3b82f6" },
+      "bg-orange-600": { light: "#ea580c", dark: "#f97316" },
+      "bg-green-600": { light: "#16a34a", dark: "#22c55e" },
+      "bg-purple-600": { light: "#9333ea", dark: "#a855f7" },
+      "bg-gray-600": { light: "#4b5563", dark: "#6b7280" },
+    };
+    return colorMap[colors.primary] || { light: "#2563eb", dark: "#3b82f6" };
+  };
 
-  const gradientClass = colors?.primary ? `from-${colors.primary.split('-')[1]}-500 to-${colors.primary.split('-')[1]}-600` : 'from-blue-500 to-blue-600';
-  
+  const bgColors = getBackgroundColor();
+
   return (
     <>
-      {/* Barre du HAUT */}
-      <nav className="md:hidden fixed top-0 left-0 w-full z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-100 dark:border-gray-800">
+      {/* Barre du haut */}
+      <nav className="md:hidden fixed top-0 left-0 w-full z-40 bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800">
         <div className="px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center space-x-3">
-            <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${gradientClass} flex items-center justify-center shadow-md`}>
-              <span className="text-white font-bold text-sm">{username.charAt(0).toUpperCase()}</span>
+          <div className="flex items-center gap-2">
+            <div
+              style={{
+                background: `linear-gradient(135deg, ${bgColors.light}, ${bgColors.dark})`,
+              }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-md ring-1 ring-gray-100 dark:ring-gray-800"
+            >
+              <span className="text-white font-bold text-sm">
+                {username.charAt(0).toUpperCase()}
+              </span>
             </div>
-            <span className="font-semibold text-gray-800 dark:text-gray-100 text-sm">{username}</span>
+            <div>
+              <div className="font-semibold text-gray-900 dark:text-gray-50 text-sm leading-tight">
+                {username}
+              </div>
+              <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                Bienvenue
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link 
-              href="/parametres" 
-              className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700/50 hover:bg-gray-200 dark:hover:bg-gray-600/50 flex items-center justify-center transition-all active:scale-95"
+            <Link
+              href="/parametres"
+              className="w-9 h-9 rounded-xl bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all active:scale-95 border border-gray-200 dark:border-gray-800"
             >
-              <Settings className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+              <Settings className="w-[18px] h-[18px] text-gray-600 dark:text-gray-400" />
             </Link>
-            <button 
-              onClick={logout} 
-              className="w-9 h-9 rounded-full bg-red-100/80 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center transition-all active:scale-95"
+            <button
+              onClick={logout}
+              className="w-9 h-9 rounded-xl bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900 flex items-center justify-center transition-all active:scale-95 border border-red-200 dark:border-red-900"
             >
-              <LogOut className="w-5 h-5 text-red-500 dark:text-red-400" />
+              <LogOut className="w-[18px] h-[18px] text-red-600 dark:text-red-400" />
             </button>
           </div>
         </div>
       </nav>
-      
-      {/* Espaceur pour pousser le contenu de la page */}
-      <div className="md:hidden" style={{ height: '61px' }} />
 
-      {/* Barre du BAS : Navigation flottante */}
-      <nav className="md:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50 pb-[env(safe-area-inset-bottom)]">
-        <div ref={navRef} className="relative flex items-center gap-x-1 p-1.5 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl rounded-full shadow-lg border border-white/50 dark:border-gray-700/50">
-          <AnimatePresence>
+      {/* CORRIGÉ : Hauteur ajustée à 61px pour inclure la bordure de 1px */}
+      <div className="md:hidden" style={{ height: "61px" }} />
+
+      {/* Barre du bas */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe">
+        <div className="px-4 pb-4">
+          <div
+            ref={navRef}
+            className="relative flex items-center justify-around px-3 py-2.5 bg-white dark:bg-gray-950 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-gray-200 dark:border-gray-800"
+          >
+            {/* Indicateur circulaire animé */}
             <motion.div
-              className="absolute h-[48px] rounded-full shadow-md"
+              className="absolute top-1/2 -translate-y-1/2 rounded-full shadow-lg"
               initial={false}
               animate={{
+                // CORRIGÉ : Animation sur 'left' au lieu de 'x'
                 left: indicatorStyle.left,
-                width: indicatorStyle.width,
-                backgroundColor: indicatorStyle.color,
                 opacity: indicatorStyle.opacity,
               }}
-              transition={{ type: "spring", duration: 0.6, bounce: 0.25 }}
-              style={{ top: '6px' }}
+              transition={{ 
+                type: "spring", 
+                stiffness: 380, 
+                damping: 30,
+                mass: 0.8
+              }}
+              style={{ 
+                width: "48px",
+                height: "48px",
+                // CORRIGÉ : Suppression du marginLeft négatif
+                // marginLeft: "-24px",
+                background: `linear-gradient(135deg, ${bgColors.light}, ${bgColors.dark})`,
+              }}
             />
-          </AnimatePresence>
 
-          {navItems.map((item, index) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link 
-                key={item.href} 
-                href={item.href} 
-                ref={(el) => { itemRefs.current[index] = el; }}
-                className="relative z-10 w-12 h-12 rounded-full flex items-center justify-center"
-              >
-                <item.icon 
-                  className={clsx(
-                    "w-6 h-6 transition-colors duration-300", 
-                    isActive ? "text-white" : "text-gray-500 dark:text-gray-400"
-                  )} 
-                />
-              </Link>
-            );
-          })}
+            {navItems.map((item, index) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                  }}
+                  className="relative z-10 flex items-center justify-center w-12 h-12"
+                >
+                  <item.icon
+                    className={clsx(
+                      "transition-all duration-300",
+                      isActive 
+                        ? "w-6 h-6 text-white" 
+                        : "w-5 h-5 text-gray-400 dark:text-gray-500"
+                    )}
+                    strokeWidth={isActive ? 2.5 : 2}
+                  />
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </nav>
+
+      
     </>
   );
 }

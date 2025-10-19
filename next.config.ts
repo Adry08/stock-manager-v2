@@ -1,26 +1,24 @@
-// next.config.ts
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
 
 const withPWA = withPWAInit({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
-  cacheOnFrontEndNav: true,
-  aggressiveFrontEndNavCaching: true,
+  cacheOnFrontEndNav: false, // évite les surcharges de navigation
+  aggressiveFrontEndNavCaching: false,
   reloadOnOnline: true,
   workboxOptions: {
     disableDevLogs: true,
     runtimeCaching: [
       {
         urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-        handler: "NetworkFirst",
+        handler: "StaleWhileRevalidate", // plus fluide sur mobile
         options: {
           cacheName: "supabase-cache",
           expiration: {
             maxEntries: 64,
-            maxAgeSeconds: 24 * 60 * 60, // 24 heures
+            maxAgeSeconds: 24 * 60 * 60, // 24h
           },
-          networkTimeoutSeconds: 10,
         },
       },
       {
@@ -45,6 +43,19 @@ const withPWA = withPWAInit({
           },
         },
       },
+      {
+        // Fallback pour tout le reste : sert ce qu’il peut sans bloquer
+        urlPattern: /.*/i,
+        handler: "NetworkFirst",
+        options: {
+          cacheName: "default-cache",
+          networkTimeoutSeconds: 5,
+          expiration: {
+            maxEntries: 128,
+            maxAgeSeconds: 7 * 24 * 60 * 60, // 7 jours
+          },
+        },
+      },
     ],
   },
 });
@@ -53,8 +64,8 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'pixabay.com', 
+        protocol: "https",
+        hostname: "pixabay.com",
       },
     ],
   },

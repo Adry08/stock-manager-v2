@@ -7,9 +7,9 @@ import { getAllClients, getClientByProductId, createClient, updateClient, delete
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ProductCard from "@/components/ProductCard";
-import { Product, Currency, ProductFormData,} from "@/types";
-import {  Client, ClientFormData } from "@/types/client"
-import { Archive, TrendingUp, Package, DollarSign } from "lucide-react";
+import { Product, Currency, ProductFormData } from "@/types";
+import { Client, ClientFormData } from "@/types/client";
+import { Archive, TrendingUp, Package, DollarSign, TrendingDown } from "lucide-react";
 import ProductFormModal from "@/components/modals/ProductFormModal";
 import ClientModal from "@/components/modals/ClientModal";
 
@@ -61,7 +61,6 @@ export default function VenduPage() {
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>();
 
@@ -103,7 +102,7 @@ export default function VenduPage() {
       const sellingPrice = p.selling_price || p.estimated_selling_price || 0;
       
       const costConverted = convertToDefaultCurrency(purchasePrice, p.currency as Currency);
-      const revenueConverted = sellingPrice; // Déjà en devise par défaut
+      const revenueConverted = sellingPrice;
       
       totalCost += costConverted * qty;
       totalRevenue += revenueConverted * qty;
@@ -257,17 +256,17 @@ export default function VenduPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
-      <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6 pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50/50 via-white to-green-50/50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
+      <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Header */}
+        {/* Header amélioré */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl shadow-lg">
-              <Archive className="w-8 h-8 text-white" />
+          <div className="flex items-center gap-4 mb-4">
+            <div className="p-4 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-xl">
+              <Archive className="w-10 h-10 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
                 Produits Vendus
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
@@ -277,7 +276,7 @@ export default function VenduPage() {
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats Cards améliorées */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCardSkeleton />
@@ -288,81 +287,89 @@ export default function VenduPage() {
         ) : soldProducts.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {/* Total Produits */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Produits Vendus
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalProducts}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     articles différents
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-lg shadow-sm">
-                  <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <div className="p-4 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-xl shadow-md">
+                  <Package className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
             </div>
 
             {/* Total Quantité */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-purple-100 dark:border-purple-900/30 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-purple-100 dark:border-purple-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Quantité Totale
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalQuantity}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     unités vendues
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/30 dark:to-purple-800/30 rounded-lg shadow-sm">
-                  <TrendingUp className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                <div className="p-4 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/30 dark:to-purple-800/30 rounded-xl shadow-md">
+                  <TrendingUp className="w-7 h-7 text-purple-600 dark:text-purple-400" />
                 </div>
               </div>
             </div>
 
             {/* Revenu Total */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-emerald-100 dark:border-emerald-900/30 hover:shadow-xl transition-shadow duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-emerald-100 dark:border-emerald-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
                     Revenu Total
                   </p>
-                  <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white truncate">
+                  <p className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white truncate">
                     {formatCurrency(stats.totalRevenue)} {getCurrencySymbol(defaultCurrency)}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                     chiffre d'affaires
                   </p>
                 </div>
-                <div className="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-lg shadow-sm flex-shrink-0">
-                  <DollarSign className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                <div className="p-4 bg-gradient-to-br from-emerald-100 to-emerald-200 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-xl shadow-md flex-shrink-0">
+                  <DollarSign className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
                 </div>
               </div>
             </div>
 
             {/* Profit Total */}
-            <div className="bg-gradient-to-br from-green-500 to-emerald-600 dark:from-green-600 dark:to-emerald-700 rounded-xl shadow-lg p-6 border border-green-300 dark:border-green-700 hover:shadow-xl transition-shadow duration-200">
+            <div className={`rounded-2xl shadow-xl p-6 border hover:shadow-2xl transition-all duration-300 hover:scale-105 ${
+              stats.totalProfit >= 0
+                ? 'bg-gradient-to-br from-green-500 to-emerald-600 dark:from-green-600 dark:to-emerald-700 border-green-300 dark:border-green-700'
+                : 'bg-gradient-to-br from-red-500 to-rose-600 dark:from-red-600 dark:to-rose-700 border-red-300 dark:border-red-700'
+            }`}>
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white/90 mb-1">
-                    Profit Total
+                  <p className="text-sm font-semibold text-white/90 mb-1">
+                    {stats.totalProfit >= 0 ? 'Profit Total' : 'Perte Totale'}
                   </p>
-                  <p className="text-2xl sm:text-3xl font-bold text-white truncate">
-                    {formatCurrency(stats.totalProfit)} {getCurrencySymbol(defaultCurrency)}
+                  <p className="text-3xl sm:text-4xl font-extrabold text-white truncate">
+                    {formatCurrency(Math.abs(stats.totalProfit))} {getCurrencySymbol(defaultCurrency)}
                   </p>
-                  <p className="text-xs text-white/80 mt-1">
-                    bénéfice net
+                  <p className="text-xs text-white/80 mt-2">
+                    {stats.totalProfit >= 0 ? 'bénéfice net' : 'déficit'}
                   </p>
                 </div>
-                <div className="p-3 bg-white/20 backdrop-blur-sm rounded-lg shadow-sm flex-shrink-0">
-                  <TrendingUp className="w-6 h-6 text-white" />
+                <div className="p-4 bg-white/20 backdrop-blur-sm rounded-xl shadow-md flex-shrink-0">
+                  {stats.totalProfit >= 0 ? (
+                    <TrendingUp className="w-7 h-7 text-white" />
+                  ) : (
+                    <TrendingDown className="w-7 h-7 text-white" />
+                  )}
                 </div>
               </div>
             </div>
@@ -377,20 +384,20 @@ export default function VenduPage() {
             ))}
           </div>
         ) : soldProducts.length === 0 ? (
-          <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700">
+          <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">
             <div className="max-w-md mx-auto px-4">
-              <div className="p-4 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 rounded-full w-24 h-24 flex items-center justify-center mx-auto mb-6 shadow-lg">
-                <Archive className="w-12 h-12 text-gray-400 dark:text-gray-500" />
+              <div className="p-6 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6 shadow-xl">
+                <Archive className="w-16 h-16 text-gray-400 dark:text-gray-500" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
                 Aucun produit vendu
               </h2>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
                 Les produits marqués comme vendus apparaîtront ici avec leurs statistiques.
               </p>
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 rounded-lg text-sm border border-gray-200 dark:border-gray-600">
-                <Package className="w-4 h-4" />
-                <span>Commencez à vendre vos produits</span>
+              <div className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700/50 dark:to-gray-600/50 text-gray-700 dark:text-gray-300 rounded-xl text-sm border border-gray-200 dark:border-gray-600 shadow-md">
+                <Package className="w-5 h-5" />
+                <span className="font-semibold">Commencez à vendre vos produits</span>
               </div>
             </div>
           </div>
@@ -403,7 +410,7 @@ export default function VenduPage() {
                 onEdit={() => openModal(p)}
                 onDelete={() => {}}
                 onClientClick={handleClientClick}
-                isDeleting={deletingId === p.id} 
+                isDeleting={false}
                 defaultCurrency={defaultCurrency}
                 exchangeRates={exchangeRates}
                 hasClient={hasClient(p.id)}

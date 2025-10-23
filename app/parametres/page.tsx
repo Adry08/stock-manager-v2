@@ -2,7 +2,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Moon, Sun, RefreshCw, TrendingUp, Calendar, Check, Database } from "lucide-react";
+// CORRECTION : Ajout de l'icône BookOpen
+import { Moon, Sun, RefreshCw, TrendingUp, Calendar, Check, Database, BookOpen } from "lucide-react";
 import CacheManager from "@/components/CacheManager";
 
 type CurrencyType = "MGA" | "USD" | "EUR" | "GBP";
@@ -67,6 +68,23 @@ const SweetAlert = ({ message, type, onClose }: { message: string, type: 'succes
   );
 };
 
+// 🆕 AJOUT : Définitions des KPI
+const KPI_GLOSSARY = [
+  { term: "EN STOCK", definition: "Nombre total d'articles actuellement en stock, prêts à être vendus." },
+  { term: "EN TRANSIT", definition: "Nombre total d'articles en cours de livraison ou de transit (ni en stock, ni vendus)." },
+  { term: "VENDUS", definition: "Nombre total d'articles qui ont été vendus et ne sont plus dans l'inventaire." },
+  { term: "ROTATION (%)", definition: "Pourcentage d'articles vendus par rapport au total des articles. Un taux élevé indique que vous vendez rapidement." },
+  { term: "MARGE MOY. (%)", definition: "La marge bénéficiaire moyenne (en %) sur vos produits, basée sur le prix d'achat et le prix de vente estimé." },
+  { term: "GAIN TOTAL", definition: "La somme de votre Gain Réel (déjà encaissé) et de votre Gain Potentiel (à venir sur le stock restant)." },
+  { term: "ACHAT TOTAL", definition: "La valeur d'achat totale de *tous* les produits que vous avez (stock, transit, et vendus)." },
+  { term: "VALEUR STOCK", definition: "Le coût d'achat total de tous les articles *actuellement en stock*." },
+  { term: "COÛT VENDUS", definition: "Le coût d'achat total des articles que vous avez *déjà vendus*." },
+  { term: "REVENU RÉEL", definition: "Le montant total (en MGA) que vous avez encaissé en vendant vos produits." },
+  { term: "GAIN RÉEL", definition: "Votre bénéfice net sur les produits déjà vendus. (REVENU RÉEL - COÛT VENDUS)." },
+  { term: "GAIN POTENTIEL", definition: "Le bénéfice que vous réaliserez si vous vendez tout votre *stock actuel* au prix de vente estimé." },
+];
+
+
 export default function ParametresPage() {
   const { theme, toggleTheme } = useTheme();
   const [currency, setCurrency] = useState<CurrencyType>("MGA");
@@ -76,7 +94,8 @@ export default function ParametresPage() {
   const [lastUpdate, setLastUpdate] = useState<string>("");
   const [availableCurrencies, setAvailableCurrencies] = useState<string[]>([]);
   const [alert, setAlert] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  const [activeTab, setActiveTab] = useState<'apparence' | 'devise' | 'cache'>('apparence');
+  // CORRECTION : Ajout de 'glossaire' au type
+  const [activeTab, setActiveTab] = useState<'apparence' | 'devise' | 'cache' | 'glossaire'>('apparence');
 
   const loadSettings = () => {
     const savedCurrency = localStorage.getItem('currency') as CurrencyType;
@@ -205,12 +224,14 @@ export default function ParametresPage() {
     loadSettings();
     loadExchangeRates();
     loadAvailableCurrencies();
-  },);
+  },[]); // CORRECTION : Array de dépendances vide pour n'exécuter qu'au montage
 
+  // 🆕 AJOUT : Ajout du nouvel onglet Glossaire
   const tabs = [
     { id: 'apparence' as const, label: 'Apparence', icon: Sun },
     { id: 'devise' as const, label: 'Devise', icon: TrendingUp },
     { id: 'cache' as const, label: 'Cache', icon: Database },
+    { id: 'glossaire' as const, label: 'Glossaire KPI', icon: BookOpen },
   ];
 
   return (
@@ -223,7 +244,7 @@ export default function ParametresPage() {
         />
       )}
       
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="container mx-auto px-4 py-6 max-w-7xl pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
         {/* Header */}
         <div className="mb-8">
           <h1 className={`text-3xl md:text-4xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} mb-2`}>
@@ -236,14 +257,14 @@ export default function ParametresPage() {
 
         {/* Navigation par onglets */}
         <div className="mb-8">
-          <div className="flex space-x-1 bg-white/50 dark:bg-gray-800/50 rounded-2xl p-1 backdrop-blur-sm">
+          <div className="flex space-x-1 bg-white/50 dark:bg-gray-800/50 rounded-2xl p-1 backdrop-blur-sm overflow-x-auto">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                     activeTab === tab.id
                       ? 'bg-white dark:bg-gray-700 shadow-lg text-gray-900 dark:text-white'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
@@ -451,6 +472,38 @@ export default function ParametresPage() {
               <CacheManager />
             </div>
           )}
+
+          {/* 🆕 AJOUT : Onglet Glossaire KPI */}
+          {activeTab === 'glossaire' && (
+            <div className={`${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} rounded-2xl shadow-lg p-6`}>
+              <div className="flex items-center gap-3 mb-6">
+                <div className={`p-2 rounded-lg ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                  <BookOpen className={`w-5 h-5 ${theme === 'dark' ? 'text-cyan-400' : 'text-cyan-600'}`} />
+                </div>
+                <h2 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                  Glossaire des Indicateurs Clés (KPI)
+                </h2>
+              </div>
+              
+              <p className={`mb-6 text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+                Voici une explication simple des termes utilisés dans votre tableau de bord Revendeur pour vous aider à mieux comprendre vos performances.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {KPI_GLOSSARY.map((item) => (
+                  <div key={item.term} className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                    <h3 className={`font-bold text-base mb-1 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                      {item.term}
+                    </h3>
+                    <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {item.definition}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
         </div>
 
         {/* Bouton de sauvegarde */}

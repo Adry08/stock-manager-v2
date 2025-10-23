@@ -1,9 +1,11 @@
-// app/stock/page.tsx - Version améliorée
+// app/stock/page.tsx - Version finale avec gestion unitaire
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Product, ProductFormData, Currency } from "@/types";
+import { ProductItem } from "@/types/productItem";
 import ProductFormModal from "@/components/modals/ProductFormModal";
+import ProductItemsModal from "@/components/modals/ProductItemsModal";
 import { 
   getProducts, 
   createProduct, 
@@ -12,6 +14,10 @@ import {
   ensureSettings 
 } from "@/services/products";
 import { 
+  getProductItems, 
+  updateMultipleItemsStatus 
+} from "@/services/productItems";
+import { 
   Plus, 
   Warehouse, 
   AlertTriangle, 
@@ -19,10 +25,13 @@ import {
   ChevronDown, 
   ChevronUp, 
   TrendingUp,
-  Package
+  Package,
+  Grid3X3,
+  List
 } from "lucide-react"; 
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import ProductCard from "@/components/ProductCard";
 
 type AppSettings = {
   default_currency: Currency;
@@ -31,6 +40,7 @@ type AppSettings = {
 
 const LOW_STOCK_THRESHOLD = 5;
 type SortableColumn = 'name' | 'quantity' | 'estimated_selling_price';
+type ViewMode = 'grid' | 'table';
 
 // Skeleton pour le tableau
 const TableRowSkeleton = () => (
@@ -46,6 +56,7 @@ const TableRowSkeleton = () => (
     </td>
     <td className="px-6 py-4 whitespace-nowrap text-right">
       <div className="flex gap-2 justify-end">
+        <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
         <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
         <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
       </div>
@@ -66,6 +77,19 @@ const StatCardSkeleton = () => (
   </div>
 );
 
+// Skeleton pour les cartes produit
+const ProductCardSkeleton = () => (
+  <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 animate-pulse">
+    <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-4"></div>
+    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full mb-2"></div>
+    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-2/3 mb-6"></div>
+    <div className="flex justify-between items-center">
+      <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded-full w-16"></div>
+      <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-20"></div>
+    </div>
+  </div>
+);
+
 export default function StockPage() {
   const { user, supabase } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -79,7 +103,14 @@ export default function StockPage() {
   const [sortBy, setSortBy] = useState<SortableColumn>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const itemsPerPage = 20;
+
+  // États pour la gestion unitaire des items
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
+  const [selectedProductForItems, setSelectedProductForItems] = useState<Product | null>(null);
+  const [productItems, setProductItems] = useState<ProductItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
 
   const defaultCurrency = (settings?.default_currency || 'MGA') as Currency;
   
@@ -179,7 +210,56 @@ export default function StockPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, viewMode]);
+
+  // Gestion des items unitaires
+  const handleManageItems = async (product: Product) => {
+    if (!supabase) return;
+    
+    setSelectedProductForItems(product);
+    setItemsModalOpen(true);
+    setItemsLoading(true);
+
+    try {
+      const items = await getProductItems(product.id, supabase);
+      setProductItems(items);
+    } catch (error) {
+      toast.error("Erreur lors du chargement des items");
+      console.error(error);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  const handleUpdateItems = async (itemIds: string[], newStatus: string) => {
+    if (!supabase || !selectedProductForItems) return;
+
+    try {
+      await updateMultipleItemsStatus(
+        itemIds, 
+        newStatus as 'stock' | 'livraison' | 'vendu',
+        supabase
+      );
+
+      // Recharger les items
+      const updatedItems = await getProductItems(selectedProductForItems.id, supabase);
+      setProductItems(updatedItems);
+
+      // Recharger les produits pour mettre à jour les quantités
+      await loadData();
+      
+      toast.success("Statut des items mis à jour !");
+    } catch (error) {
+      toast.error("Erreur lors de la mise à jour des items");
+      throw error;
+    }
+  };
+
+  const closeItemsModal = () => {
+    setItemsModalOpen(false);
+    setSelectedProductForItems(null);
+    setProductItems([]);
+  };
 
   const handleCreate = async (values: ProductFormData) => {
     if (!user || !supabase) {
@@ -379,18 +459,44 @@ export default function StockPage() {
           </div>
         ) : null}
 
-        {/* Barre de Contrôle */}
+        {/* Barre de Contrôle améliorée */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Rechercher par nom ou description..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full p-3 pl-10 border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm text-gray-900 dark:text-white"
-              disabled={initialLoading || !!dataError}
-            />
+          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+            <div className="relative w-full md:w-96">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Rechercher par nom ou description..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full p-3 pl-10 border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm text-gray-900 dark:text-white"
+                disabled={initialLoading || !!dataError}
+              />
+            </div>
+            
+            {/* Sélecteur de vue */}
+            <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 p-1 rounded-xl">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-all ${
+                  viewMode === 'grid' 
+                    ? 'bg-white dark:bg-gray-600 shadow-md text-indigo-600 dark:text-indigo-400' 
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                <Grid3X3 className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-2 rounded-lg transition-all ${
+                  viewMode === 'table' 
+                    ? 'bg-white dark:bg-gray-600 shadow-md text-indigo-600 dark:text-indigo-400' 
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                <List className="w-5 h-5" />
+              </button>
+            </div>
           </div>
           
           <button
@@ -404,23 +510,31 @@ export default function StockPage() {
         </div>
 
         {initialLoading ? (
-          <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nom du Produit</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stock</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Prix Estimé</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <TableRowSkeleton key={i} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          viewMode === 'table' ? (
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nom du Produit</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stock</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Prix Estimé</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <TableRowSkeleton key={i} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <ProductCardSkeleton key={i} />
+              ))}
+            </div>
+          )
         ) : dataError ? (
           <div className="text-center py-12 bg-red-50 dark:bg-red-900/20 rounded-2xl shadow-xl border border-red-200 dark:border-red-800">
             <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
@@ -454,6 +568,82 @@ export default function StockPage() {
             <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">Aucun produit trouvé</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6">Vérifiez l'orthographe ou essayez un autre terme de recherche.</p>
           </div>
+        ) : viewMode === 'grid' ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {paginatedProducts.map((product) => (
+                <ProductCard 
+                  key={product.id} 
+                  product={product} 
+                  onEdit={() => openModal(product)}
+                  onDelete={handleDelete}
+                  onManageItems={handleManageItems}
+                  isDeleting={deletingId === product.id}
+                  defaultCurrency={defaultCurrency}
+                  exchangeRates={exchangeRates}
+                />
+              ))}
+            </div>
+
+            {/* Pagination pour la vue grille */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+                <div className="text-sm text-gray-700 dark:text-gray-300">
+                  Page <span className="font-bold">{currentPage}</span> sur <span className="font-bold">{totalPages}</span>
+                  <span className="ml-2 text-gray-500 dark:text-gray-400">
+                    ({paginatedProducts.length} sur {stockProducts.length} produits)
+                  </span>
+                </div>
+                
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
+                  >
+                    Précédent
+                  </button>
+                  
+                  <div className="hidden sm:flex gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`px-4 py-2 rounded-lg font-bold transition-all shadow-md ${
+                            currentPage === pageNum
+                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white scale-105'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
+                  >
+                    Suivant
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <>
             <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-100 dark:border-gray-700">
@@ -526,10 +716,16 @@ export default function StockPage() {
                         {product.estimated_selling_price?.toLocaleString() || 'N/A'} Ar
                       </td>
                       
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                        <button 
+                          onClick={() => handleManageItems(product)}
+                          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 transition-colors font-bold hover:underline"
+                        >
+                          Items
+                        </button>
                         <button 
                           onClick={() => openModal(product)} 
-                          className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-4 transition-colors font-bold hover:underline"
+                          className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors font-bold hover:underline"
                         >
                           Modifier
                         </button>
@@ -547,7 +743,7 @@ export default function StockPage() {
               </table>
             </div>
 
-            {/* Pagination */}
+            {/* Pagination pour la vue tableau */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
                 <div className="text-sm text-gray-700 dark:text-gray-300">
@@ -608,6 +804,7 @@ export default function StockPage() {
           </>
         )}
 
+        {/* Modal de création/édition de produit */}
         <ProductFormModal
           isOpen={modalOpen}
           onClose={closeModal}
@@ -616,6 +813,18 @@ export default function StockPage() {
           defaultCurrency={defaultCurrency}
           exchangeRates={exchangeRates}
         />
+
+        {/* Modal de gestion des items */}
+        {selectedProductForItems && (
+          <ProductItemsModal
+            isOpen={itemsModalOpen}
+            onClose={closeItemsModal}
+            product={selectedProductForItems}
+            items={productItems}
+            onUpdateItems={handleUpdateItems}
+            loading={itemsLoading}
+          />
+        )}
       </div>
     </div>
   );

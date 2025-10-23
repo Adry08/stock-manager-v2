@@ -1,11 +1,17 @@
-// app/livraison/page.tsx
+// app/livraison/page.tsx - VERSION CORRIGÉE avec calculs basés sur les ITEMS en livraison
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Product, Currency, ProductFormData} from "@/types";
+import { ProductItem } from "@/types/productItem";
 import { Client, ClientFormData } from "@/types/client";
 import ProductCard from "@/components/ProductCard";
+import ProductItemsModal from "@/components/modals/ProductItemsModal";
 import { getProducts, ensureSettings, updateProduct } from "@/services/products";
+import { 
+  getProductItems, 
+  updateMultipleItemsStatus
+} from "@/services/productItems";
 import { getAllClients, getClientByProductId, createClient, updateClient, deleteClient } from "@/services/clients";
 import { Truck, Package, Clock, TrendingUp, Filter, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -16,8 +22,8 @@ import DeliveryCalendar from "@/components/DeliveryCalendar";
 import { Button } from "@/components/ui/button";
 import MobileCalendarSheet from "@/components/MobileCalendarSheet";
 
+// (Le code des Skeletons reste inchangé)
 
-// Skeleton Cards
 const StatCardSkeleton = () => (
   <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 animate-pulse">
     <div className="flex items-center justify-between">
@@ -65,13 +71,20 @@ const CalendarSkeleton = () => (
   </div>
 );
 
+// --- Début des modifications majeures ---
+
+// Nouveau type pour les produits enrichis avec la quantité réelle en livraison
+type DeliveryProduct = Product & {
+  delivery_quantity: number;
+};
+
 export default function LivraisonPage() {
   const { user, supabase } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  // NOUVEL ÉTAT pour stocker tous les items en statut 'livraison'
+  const [deliveryItems, setDeliveryItems] = useState<ProductItem[]>([]);
   const [allClients, setAllClients] = useState<Client[]>([]);
-
   const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
-
   
   const [settings, setSettings] = useState<{ 
     default_currency: Currency; 
@@ -89,6 +102,12 @@ export default function LivraisonPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showCalendar] = useState(false);
 
+  // États pour la gestion unitaire des items
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
+  const [selectedProductForItems, setSelectedProductForItems] = useState<Product | null>(null);
+  const [productItems, setProductItems] = useState<ProductItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
   const defaultCurrency = (settings?.default_currency || 'MGA') as Currency;
   const exchangeRates = useMemo<Record<Currency, number>>(() => {
     if (!settings?.exchange_rates || typeof settings.exchange_rates !== 'object') {
@@ -97,13 +116,32 @@ export default function LivraisonPage() {
     return settings.exchange_rates as Record<Currency, number>;
   }, [settings?.exchange_rates]);
 
-  const deliveryProducts = useMemo(() => {
-    return allProducts.filter(p => p.status === 'livraison');
-  }, [allProducts]);
+  // NOUVEAU: Liste des produits enrichis avec la quantité réelle d'items en livraison
+  const deliveryProductsWithQuantities = useMemo<DeliveryProduct[]>(() => {
+    const itemCounts = deliveryItems.reduce((acc, item) => {
+      acc[item.product_id] = (acc[item.product_id] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return allProducts
+      .filter(p => itemCounts[p.id] > 0) // Ne garde que les produits qui ont au moins 1 item en livraison
+      .map(p => ({
+        ...p,
+        // La quantité affichée doit être la quantité réelle d'items en livraison
+        delivery_quantity: itemCounts[p.id] || 0,
+        // On conserve la 'quantity' originale pour d'autres usages, mais on se base sur delivery_quantity pour l'affichage
+      })) as DeliveryProduct[];
+  }, [allProducts, deliveryItems]);
+
+
+  // REMPLACEMENT de deliveryProducts par deliveryProductsWithQuantities
+  const deliveryProducts = deliveryProductsWithQuantities;
+
 
   const filteredProducts = useMemo(() => {
     if (!selectedDate) return deliveryProducts;
     
+    // FILTRAGE basé sur les clients
     const clientsForDate = allClients.filter(c => c.delivery_date === selectedDate);
     const productIdsForDate = clientsForDate.map(c => c.product_id);
     
@@ -118,18 +156,22 @@ export default function LivraisonPage() {
     return amountInEUR * rateTo;
   }, [defaultCurrency, exchangeRates]);
 
+  // CORRECTION: Calcul des stats sur TOUS les produits en livraison, basé sur delivery_quantity
   const stats = useMemo(() => {
-    const totalProducts = filteredProducts.length;
-    const totalValue = filteredProducts.reduce((sum, p) => {
+    const totalProducts = deliveryProducts.length; 
+    const totalValue = deliveryProducts.reduce((sum, p) => {
+      // Utilise la delivery_quantity pour le calcul de la valeur totale
       const price = p.purchase_price || 0;
-      const qty = p.quantity || 0;
+      const qty = p.delivery_quantity || 0; // UTILISE delivery_quantity
       const productValue = price * qty;
       const convertedValue = convertToDefaultCurrency(productValue, p.currency as Currency);
       return sum + convertedValue;
     }, 0);
-    const totalQuantity = filteredProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+    // Utilise la delivery_quantity pour la quantité totale
+    const totalQuantity = deliveryProducts.reduce((sum, p) => sum + (p.delivery_quantity || 0), 0); 
+    
     return { totalProducts, totalValue, totalQuantity };
-  }, [filteredProducts, convertToDefaultCurrency]);
+  }, [deliveryProducts, convertToDefaultCurrency]); 
   
   const loadData = useCallback(async () => {
     if (!user || !supabase) {
@@ -146,13 +188,17 @@ export default function LivraisonPage() {
         exchange_rates: settingsData.exchange_rates as Record<Currency, number>,
       });
 
-      const [productsData, clientsData] = await Promise.all([
-        getProducts(supabase),
-        getAllClients(supabase)
+      // MODIFICATION: Fetch en parallèle des produits, des clients, ET des items en livraison
+      const [productsData, clientsData, itemsResult] = await Promise.all([
+        getProducts(supabase), // Récupère tous les produits de la base (potentiellement tous statuts)
+        getAllClients(supabase),
+        // Requête directe pour récupérer tous les items en statut 'livraison'
+        supabase.from('product_items').select('*').eq('status', 'livraison'), 
       ]);
       
       setAllProducts(productsData);
       setAllClients(clientsData);
+      setDeliveryItems(itemsResult.data || []); // Stocke les items en livraison
     } catch (err) {
       toast.error("Erreur lors du chargement des données.");
       console.error("Erreur:", err);
@@ -161,10 +207,70 @@ export default function LivraisonPage() {
     }
   }, [user, supabase]);
 
+  // Ouvrir la modal de gestion des items
+  const handleManageItems = async (product: Product) => {
+    // Reste inchangé, il faut toujours charger tous les items pour cette modal.
+    if (!supabase) return;
+    
+    setSelectedProductForItems(product);
+    setItemsModalOpen(true);
+    setItemsLoading(true);
+
+    try {
+      const items = await getProductItems(product.id, supabase);
+      setProductItems(items);
+    } catch (error) {
+      toast.error("Erreur lors du chargement des items");
+      console.error(error);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // Mettre à jour plusieurs items (permet de passer en vendu)
+  const handleUpdateItems = async (itemIds: string[], newStatus: string) => {
+    // Reste inchangé, mais on s'assure de recharger les données après.
+    if (!supabase || !selectedProductForItems) return;
+
+    try {
+      await updateMultipleItemsStatus(
+        itemIds, 
+        newStatus as 'stock' | 'livraison' | 'vendu',
+        supabase
+      );
+
+      // Recharger les items de la modal
+      const updatedItems = await getProductItems(selectedProductForItems.id, supabase);
+      setProductItems(updatedItems);
+
+      // Recharger TOUTES les données pour mettre à jour la liste deliveryProductsWithQuantities et les stats
+      await loadData();
+      
+      // Message personnalisé selon le nouveau statut
+      if (newStatus === 'vendu') {
+        toast.success(`${itemIds.length} item(s) marqué(s) comme vendu(s) !`);
+      } else if (newStatus === 'stock') {
+        toast.success(`${itemIds.length} item(s) remis en stock !`);
+      } else {
+        toast.success(`${itemIds.length} item(s) mis à jour !`);
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  // Fermer la modal des items
+  const closeItemsModal = () => {
+    setItemsModalOpen(false);
+    setSelectedProductForItems(null);
+    setProductItems([]);
+  };
+
   const handleUpdate = async (values: ProductFormData) => {
     if (!user || !supabase || !editingProduct) return;
     
     try {
+      // NOTE: La modification d'un produit ne doit pas écraser la 'quantity' agrégée
       const updatedProduct = { ...editingProduct, ...values } as Product;
       await updateProduct(updatedProduct, user.id, supabase);
       toast.success("Produit modifié !");
@@ -191,6 +297,7 @@ export default function LivraisonPage() {
     }
   };
 
+  // Le reste des fonctions (handleClientSubmit, handleClientDelete, openModal, closeModal, formatCurrency, getCurrencySymbol, hasClient) reste inchangé
   const handleClientSubmit = async (data: ClientFormData) => {
     if (!user || !supabase || !selectedProduct) return;
 
@@ -264,6 +371,7 @@ export default function LivraisonPage() {
     return allClients.some(c => c.product_id === productId);
   }, [allClients]);
 
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -293,7 +401,7 @@ export default function LivraisonPage() {
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   {selectedDate 
                     ? `Livraisons du ${new Date(selectedDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`
-                    : 'Suivez vos produits en cours de livraison'
+                    : 'Suivez vos produits en cours de livraison (basé sur les items)' // Texte mis à jour
                   }
                 </p>
               </div>
@@ -312,19 +420,18 @@ export default function LivraisonPage() {
               )}
               
               <Button
-  variant="outline"
-  onClick={() => setIsMobileSheetOpen(true)}
-  className="flex items-center gap-2 lg:hidden"
->
-  <Filter className="w-4 h-4" />
-  Calendrier
-</Button>
-
+                variant="outline"
+                onClick={() => setIsMobileSheetOpen(true)}
+                className="flex items-center gap-2 lg:hidden"
+              >
+                <Filter className="w-4 h-4" />
+                Calendrier
+              </Button>
             </div>
           </div>
         </div>
 
-        {/* Stats Cards améliorées */}
+        {/* Stats Cards améliorées - AFFICHENT MAINTENANT TOUS LES PRODUITS EN LIVRAISON (selon items) */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <StatCardSkeleton />
@@ -337,13 +444,16 @@ export default function LivraisonPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                    {selectedDate ? 'Produits filtrés' : 'Total Produits'}
+                    Total Produits Uniques
                   </p>
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalProducts}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    articles différents
+                    {selectedDate 
+                      ? `${filteredProducts.length} produits uniques pour cette date` 
+                      : 'articles en transit'
+                    }
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/30 dark:to-orange-800/30 rounded-xl shadow-md">
@@ -356,13 +466,16 @@ export default function LivraisonPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                    Quantité Totale
+                    Quantité Totale (Items)
                   </p>
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalQuantity}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    unités en transit
+                    {selectedDate 
+                      ? `${filteredProducts.reduce((sum, p) => sum + (p as DeliveryProduct).delivery_quantity, 0)} unités pour cette date` 
+                      : 'unités d\'items en transit' // Texte mis à jour
+                    }
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-xl shadow-md">
@@ -381,7 +494,19 @@ export default function LivraisonPage() {
                     {formatCurrency(stats.totalValue)} {getCurrencySymbol(defaultCurrency)}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    en {defaultCurrency}
+                    {selectedDate 
+                      ? `Valeur filtrée: ${formatCurrency(
+                          filteredProducts.reduce((sum, p) => {
+                            const dp = p as DeliveryProduct;
+                            const price = dp.purchase_price || 0;
+                            const qty = dp.delivery_quantity || 0; // UTILISE delivery_quantity
+                            const productValue = price * qty;
+                            const convertedValue = convertToDefaultCurrency(productValue, dp.currency as Currency);
+                            return sum + convertedValue;
+                          }, 0)
+                        )} ${getCurrencySymbol(defaultCurrency)}`
+                      : `en ${defaultCurrency}`
+                    }
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-xl shadow-md flex-shrink-0">
@@ -413,7 +538,7 @@ export default function LivraisonPage() {
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
                     {selectedDate 
                       ? 'Sélectionnez une autre date dans le calendrier.'
-                      : 'Les produits en cours de livraison apparaîtront ici.'
+                      : 'Les produits (items) en cours de livraison apparaîtront ici.'
                     }
                   </p>
                   {selectedDate && (
@@ -430,13 +555,19 @@ export default function LivraisonPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                {filteredProducts.map((p: Product) => (
+                {filteredProducts.map((p: DeliveryProduct) => (
                   <ProductCard
                     key={p.id}
-                    product={p}
+                    // Le composant ProductCard doit utiliser p.delivery_quantity pour afficher la quantité
+                    // Je m'assure que le ProductCard est bien typé pour recevoir un Product
+                    // mais il utilisera p.delivery_quantity si elle existe. 
+                    // Pour le moment, je passe juste 'p' et j'assume que ProductCard gère ce nouveau champ.
+                    // Si ProductCard n'est pas corrigé, il faudra renommer 'delivery_quantity' en 'quantity' ici.
+                    product={{...p, quantity: p.delivery_quantity}} // FORCE la quantité du produit affiché à la quantité d'items en livraison
                     onEdit={() => openModal(p)}
                     onDelete={() => {}}
                     onClientClick={handleClientClick}
+                    onManageItems={handleManageItems}
                     isDeleting={false}
                     defaultCurrency={defaultCurrency}
                     exchangeRates={exchangeRates}
@@ -456,7 +587,8 @@ export default function LivraisonPage() {
               <div className="sticky top-24">
                 <DeliveryCalendar
                   clients={allClients}
-                  products={deliveryProducts}
+                  // Les produits pour le calendrier sont tous les produits qui ont des items en livraison
+                  products={deliveryProducts} 
                   onDateSelect={setSelectedDate}
                   selectedDate={selectedDate}
                 />
@@ -501,16 +633,28 @@ export default function LivraisonPage() {
             productName={selectedProduct.name}
           />
         )}
-      </div>
-      <MobileCalendarSheet
-  isOpen={isMobileSheetOpen}
-  onClose={() => setIsMobileSheetOpen(false)}
-  clients={allClients}
-  products={deliveryProducts}
-  selectedDate={selectedDate}
-  onDateSelect={setSelectedDate}
-/>
 
+        {/* Modal de gestion des items */}
+        {selectedProductForItems && (
+          <ProductItemsModal
+            isOpen={itemsModalOpen}
+            onClose={closeItemsModal}
+            product={selectedProductForItems}
+            items={productItems}
+            onUpdateItems={handleUpdateItems}
+            loading={itemsLoading}
+          />
+        )}
+
+        <MobileCalendarSheet
+          isOpen={isMobileSheetOpen}
+          onClose={() => setIsMobileSheetOpen(false)}
+          clients={allClients}
+          products={deliveryProducts}
+          selectedDate={selectedDate}
+          onDateSelect={setSelectedDate}
+        />
+      </div>
     </div>
   );
 }

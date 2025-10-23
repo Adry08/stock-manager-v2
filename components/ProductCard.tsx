@@ -4,7 +4,7 @@ import { Currency, Product } from "@/types";
 import { Card, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2, Loader2, Package, UserCircle } from "lucide-react";
+import { Edit, Trash2, Loader2, Package, UserCircle, Settings2 } from "lucide-react";
 import Image from "next/image";
 import { useState, useEffect } from "react";
 import { convertToDefaultCurrency, formatPrice } from "@/services/currency";
@@ -14,6 +14,7 @@ interface ProductCardProps {
   onEdit: (product: Product) => void;
   onDelete: (id: string) => void;
   onClientClick?: (product: Product) => void;
+  onManageItems?: (product: Product) => void; // 🆕 NOUVEAU
   isDeleting: boolean;
   defaultCurrency: string;
   exchangeRates?: Record<string, number>;
@@ -25,6 +26,7 @@ export default function ProductCard({
   onEdit,
   onDelete,
   onClientClick,
+  onManageItems, // 🆕 NOUVEAU
   isDeleting,
   defaultCurrency,
   exchangeRates,
@@ -117,7 +119,7 @@ export default function ProductCard({
           {product.status === "stock" ? "En Stock" : product.status === "livraison" ? "Livraison" : "Vendu"}
         </Badge>
 
-        {/* Bouton client : toujours sur l'image, bas à droite */}
+        {/* Bouton client */}
         {showClientIcon && onClientClick && (
           <button
             onClick={() => onClientClick(product)}
@@ -129,6 +131,17 @@ export default function ProductCard({
             title={hasClient ? "Voir/Modifier le client" : "Ajouter un client"}
           >
             <UserCircle className="w-6 h-6" />
+          </button>
+        )}
+
+        {/* 🆕 NOUVEAU - Bouton gérer les items (en bas à gauche) */}
+        {onManageItems && quantity > 1 && (
+          <button
+            onClick={() => onManageItems(product)}
+            className="absolute bottom-3 left-3 p-2 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 bg-indigo-500 hover:bg-indigo-600 text-white"
+            title="Gérer les items unitaires"
+          >
+            <Settings2 className="w-5 h-5" />
           </button>
         )}
       </div>
@@ -206,7 +219,7 @@ export default function ProductCard({
         </div>
       </div>
 
-      {/* Footer fixe en bas avec edit/delete */}
+      {/* Footer avec boutons */}
       <CardFooter className="p-4 flex justify-between items-center mt-auto border-t dark:border-gray-700">
         <div className="flex gap-2">
           <Button

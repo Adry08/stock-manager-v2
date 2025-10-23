@@ -3,11 +3,17 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { getProducts, ensureSettings, updateProduct } from "@/services/products";
+import { 
+  getProductItems, 
+  updateMultipleItemsStatus 
+} from "@/services/productItems";
 import { getAllClients, getClientByProductId, createClient, updateClient, deleteClient } from "@/services/clients";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ProductCard from "@/components/ProductCard";
+import ProductItemsModal from "@/components/modals/ProductItemsModal";
 import { Product, Currency, ProductFormData } from "@/types";
+import { ProductItem } from "@/types/productItem";
 import { Client, ClientFormData } from "@/types/client";
 import { Archive, TrendingUp, Package, DollarSign, TrendingDown } from "lucide-react";
 import ProductFormModal from "@/components/modals/ProductFormModal";
@@ -67,6 +73,12 @@ export default function VenduPage() {
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  // États pour la gestion unitaire des items
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
+  const [selectedProductForItems, setSelectedProductForItems] = useState<Product | null>(null);
+  const [productItems, setProductItems] = useState<ProductItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
 
   const defaultCurrency = (settings?.default_currency || 'MGA') as Currency;
   const exchangeRates = useMemo<Record<Currency, number>>(() => {
@@ -142,6 +154,63 @@ export default function VenduPage() {
       setLoading(false);
     }
   }, [user, supabase]);
+
+  // Ouvrir la modal de gestion des items
+  const handleManageItems = async (product: Product) => {
+    if (!supabase) return;
+    
+    setSelectedProductForItems(product);
+    setItemsModalOpen(true);
+    setItemsLoading(true);
+
+    try {
+      const items = await getProductItems(product.id, supabase);
+      setProductItems(items);
+    } catch (error) {
+      toast.error("Erreur lors du chargement des items");
+      console.error(error);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // Mettre à jour plusieurs items (permet de remettre en stock/livraison)
+  const handleUpdateItems = async (itemIds: string[], newStatus: string) => {
+    if (!supabase || !selectedProductForItems) return;
+
+    try {
+      await updateMultipleItemsStatus(
+        itemIds, 
+        newStatus as 'stock' | 'livraison' | 'vendu',
+        supabase
+      );
+
+      // Recharger les items
+      const updatedItems = await getProductItems(selectedProductForItems.id, supabase);
+      setProductItems(updatedItems);
+
+      // Recharger les produits
+      await loadData();
+      
+      // Message personnalisé
+      if (newStatus === 'stock') {
+        toast.success(`${itemIds.length} item(s) remis en stock !`);
+      } else if (newStatus === 'livraison') {
+        toast.success(`${itemIds.length} item(s) remis en livraison !`);
+      } else {
+        toast.success(`${itemIds.length} item(s) mis à jour !`);
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  // Fermer la modal des items
+  const closeItemsModal = () => {
+    setItemsModalOpen(false);
+    setSelectedProductForItems(null);
+    setProductItems([]);
+  };
 
   const handleUpdate = async (values: ProductFormData) => {
     if (!user || !supabase || !editingProduct) return;
@@ -410,6 +479,7 @@ export default function VenduPage() {
                 onEdit={() => openModal(p)}
                 onDelete={() => {}}
                 onClientClick={handleClientClick}
+                onManageItems={handleManageItems}
                 isDeleting={false}
                 defaultCurrency={defaultCurrency}
                 exchangeRates={exchangeRates}
@@ -441,6 +511,18 @@ export default function VenduPage() {
             onDelete={selectedClient ? handleClientDelete : undefined}
             client={selectedClient}
             productName={selectedProduct.name}
+          />
+        )}
+
+        {/* Modal de gestion des items */}
+        {selectedProductForItems && (
+          <ProductItemsModal
+            isOpen={itemsModalOpen}
+            onClose={closeItemsModal}
+            product={selectedProductForItems}
+            items={productItems}
+            onUpdateItems={handleUpdateItems}
+            loading={itemsLoading}
           />
         )}
       </div>

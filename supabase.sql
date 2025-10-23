@@ -1,6 +1,15 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+CREATE TABLE public.client_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL,
+  product_item_id uuid NOT NULL UNIQUE,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT client_items_pkey PRIMARY KEY (id),
+  CONSTRAINT client_items_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id),
+  CONSTRAINT client_items_product_item_id_fkey FOREIGN KEY (product_item_id) REFERENCES public.product_items(id)
+);
 CREATE TABLE public.clients (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   product_id uuid NOT NULL,
@@ -54,9 +63,22 @@ CREATE TABLE public.movements (
   field_changed text,
   old_value jsonb,
   new_value jsonb,
+  product_item_id uuid,
   CONSTRAINT movements_pkey PRIMARY KEY (id),
   CONSTRAINT movements_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT movements_product_item_id_fkey FOREIGN KEY (product_item_id) REFERENCES public.product_items(id),
   CONSTRAINT movements_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.product_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'stock'::text CHECK (status = ANY (ARRAY['stock'::text, 'livraison'::text, 'vendu'::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  selling_price numeric,
+  sold_at timestamp with time zone,
+  CONSTRAINT product_items_pkey PRIMARY KEY (id),
+  CONSTRAINT product_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
 );
 CREATE TABLE public.products (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

@@ -1,4 +1,4 @@
-// app/stock/page.tsx - Version finale avec gestion unitaire
+// app/stock/page.tsx - VERSION MISE À JOUR avec calculs centralisés
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -6,43 +6,19 @@ import { Product, ProductFormData, Currency } from "@/types";
 import { ProductItem } from "@/types/productItem";
 import ProductFormModal from "@/components/modals/ProductFormModal";
 import ProductItemsModal from "@/components/modals/ProductItemsModal";
-import { 
-  getProducts, 
-  createProduct, 
-  updateProduct, 
-  deleteProduct, 
-  ensureSettings 
-} from "@/services/products";
-import { 
-  getProductItems, 
-  updateMultipleItemsStatus 
-} from "@/services/productItems";
-import { 
-  Plus, 
-  Warehouse, 
-  AlertTriangle, 
-  Search, 
-  ChevronDown, 
-  ChevronUp, 
-  TrendingUp,
-  Package,
-  Grid3X3,
-  List
-} from "lucide-react"; 
+import { getProducts, createProduct, updateProduct, deleteProduct, ensureSettings } from "@/services/products";
+import { getProductItems, updateMultipleItemsStatus } from "@/services/productItems";
+import { calculateStockStats, PageSpecificStats } from "@/services/calculations";
+import { Plus, Warehouse, AlertTriangle, Search, ChevronDown, ChevronUp, TrendingUp, Package, Grid3X3, List } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ProductCard from "@/components/ProductCard";
-
-type AppSettings = {
-  default_currency: Currency;
-  exchange_rates: Record<Currency, number>;
-};
 
 const LOW_STOCK_THRESHOLD = 5;
 type SortableColumn = 'name' | 'quantity' | 'estimated_selling_price';
 type ViewMode = 'grid' | 'table';
 
-// Skeleton pour le tableau
+// Skeletons (identiques)
 const TableRowSkeleton = () => (
   <tr className="animate-pulse">
     <td className="px-6 py-4 whitespace-nowrap">
@@ -64,7 +40,6 @@ const TableRowSkeleton = () => (
   </tr>
 );
 
-// Skeleton pour les cartes de stats
 const StatCardSkeleton = () => (
   <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 animate-pulse">
     <div className="flex items-center justify-between">
@@ -77,7 +52,6 @@ const StatCardSkeleton = () => (
   </div>
 );
 
-// Skeleton pour les cartes produit
 const ProductCardSkeleton = () => (
   <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 animate-pulse">
     <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-4"></div>
@@ -93,9 +67,13 @@ const ProductCardSkeleton = () => (
 export default function StockPage() {
   const { user, supabase } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true); 
-  const [dataError, setDataError] = useState<string | null>(null); 
+  const [allItems, setAllItems] = useState<ProductItem[]>([]);
+  const [settings, setSettings] = useState<{ 
+    default_currency: Currency; 
+    exchange_rates: Record<Currency, number>; 
+  } | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>();
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -111,9 +89,9 @@ export default function StockPage() {
   const [selectedProductForItems, setSelectedProductForItems] = useState<Product | null>(null);
   const [productItems, setProductItems] = useState<ProductItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [stats, setStats] = useState<PageSpecificStats | null>(null);
 
   const defaultCurrency = (settings?.default_currency || 'MGA') as Currency;
-  
   const exchangeRates = useMemo<Record<Currency, number>>(() => {
     if (!settings?.exchange_rates || typeof settings.exchange_rates !== 'object') {
       return { MGA: 1, USD: 1, EUR: 1, GBP: 1 };
@@ -121,36 +99,45 @@ export default function StockPage() {
     return settings.exchange_rates as Record<Currency, number>;
   }, [settings?.exchange_rates]);
 
-  // Filtrage et tri
+  // Items en stock uniquement
+  const stockItems = useMemo(() => 
+    allItems.filter(i => i.status === 'stock'),
+    [allItems]
+  );
+
+  // Produits avec items en stock (avec quantités réelles)
   const stockProducts = useMemo(() => {
-    let filtered = (allProducts || [])
-      .filter(p => p.status === 'stock')
+    const itemCounts: Record<string, number> = {};
+    stockItems.forEach(item => {
+      itemCounts[item.product_id] = (itemCounts[item.product_id] || 0) + 1;
+    });
+
+    return allProducts
+      .filter(p => itemCounts[p.id] > 0)
+      .map(p => ({
+        ...p,
+        quantity: itemCounts[p.id] || 0
+      }))
       .filter(p => 
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (p.description && p.description.toLowerCase().includes(searchTerm.toLowerCase()))
-      );
-
-    filtered.sort((a, b) => {
-      let comparison = 0;
-      
-      switch (sortBy) {
-        case 'quantity':
-          comparison = (a.quantity || 0) - (b.quantity || 0);
-          break;
-        case 'estimated_selling_price':
-          comparison = (a.estimated_selling_price || 0) - (b.estimated_selling_price || 0);
-          break;
-        case 'name':
-        default:
-          comparison = a.name.localeCompare(b.name);
-          break;
-      }
-      
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    return filtered;
-  }, [allProducts, searchTerm, sortBy, sortDirection]);
+      )
+      .sort((a, b) => {
+        let comparison = 0;
+        switch (sortBy) {
+          case 'quantity':
+            comparison = a.quantity - b.quantity;
+            break;
+          case 'estimated_selling_price':
+            comparison = (a.estimated_selling_price || 0) - (b.estimated_selling_price || 0);
+            break;
+          case 'name':
+          default:
+            comparison = a.name.localeCompare(b.name);
+        }
+        return sortDirection === 'asc' ? comparison : -comparison;
+      });
+  }, [allProducts, stockItems, searchTerm, sortBy, sortDirection]);
 
   // Pagination
   const totalPages = Math.ceil(stockProducts.length / itemsPerPage);
@@ -159,21 +146,30 @@ export default function StockPage() {
     return stockProducts.slice(start, start + itemsPerPage);
   }, [stockProducts, currentPage]);
 
-  // Statistiques
-  const stats = useMemo(() => {
-    const totalProducts = stockProducts.length;
-    const lowStockCount = stockProducts.filter(p => p.quantity < LOW_STOCK_THRESHOLD).length;
-    
-    const totalValue = stockProducts.reduce((sum, p) => {
-      const price = p.estimated_selling_price || 0;
-      const qty = p.quantity || 0;
-      return sum + (price * qty);
-    }, 0);
-    
-    const totalQuantity = stockProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+  // Calcul des statistiques avec le service centralisé
+  useEffect(() => {
+    const computeStats = async () => {
+      if (!settings || stockItems.length === 0) {
+        setStats(null);
+        return;
+      }
 
-    return { totalProducts, totalValue, totalQuantity, lowStockCount };
-  }, [stockProducts]);
+      try {
+        const stockStats = await calculateStockStats(
+          allProducts,
+          stockItems,
+          defaultCurrency,
+          exchangeRates,
+          LOW_STOCK_THRESHOLD
+        );
+        setStats(stockStats);
+      } catch (error) {
+        console.error("Erreur calcul stats stock:", error);
+      }
+    };
+
+    computeStats();
+  }, [allProducts, stockItems, settings, defaultCurrency, exchangeRates]);
 
   const loadData = useCallback(async () => {
     if (!user || !supabase) {
@@ -182,7 +178,7 @@ export default function StockPage() {
     }
 
     try {
-      setDataError(null); 
+      setDataError(null);
       setInitialLoading(true);
       
       const settingsData = await ensureSettings(user.id, supabase);
@@ -193,12 +189,17 @@ export default function StockPage() {
 
       const productsData = await getProducts(supabase);
       setAllProducts(productsData);
+
+      const { data: itemsData } = await supabase
+        .from('product_items')
+        .select('*');
       
+      setAllItems(itemsData || []);
     } catch (err) {
       const errorMessage = "Erreur lors du chargement de l'inventaire.";
       toast.error(errorMessage);
-      console.error("Erreur lors du chargement des produits:", err);
-      setDataError(errorMessage); 
+      console.error(err);
+      setDataError(errorMessage);
     } finally {
       setInitialLoading(false);
     }
@@ -212,7 +213,6 @@ export default function StockPage() {
     setCurrentPage(1);
   }, [searchTerm, viewMode]);
 
-  // Gestion des items unitaires
   const handleManageItems = async (product: Product) => {
     if (!supabase) return;
     
@@ -235,19 +235,10 @@ export default function StockPage() {
     if (!supabase || !selectedProductForItems) return;
 
     try {
-      await updateMultipleItemsStatus(
-        itemIds, 
-        newStatus as 'stock' | 'livraison' | 'vendu',
-        supabase
-      );
-
-      // Recharger les items
+      await updateMultipleItemsStatus(itemIds, newStatus as 'stock' | 'livraison' | 'vendu', supabase);
       const updatedItems = await getProductItems(selectedProductForItems.id, supabase);
       setProductItems(updatedItems);
-
-      // Recharger les produits pour mettre à jour les quantités
       await loadData();
-      
       toast.success("Statut des items mis à jour !");
     } catch (error) {
       toast.error("Erreur lors de la mise à jour des items");
@@ -270,10 +261,11 @@ export default function StockPage() {
     try {
       await createProduct(values, user.id, supabase);
       toast.success("Produit ajouté en stock !");
-      loadData(); 
+      loadData();
       closeModal();
     } catch (error) {
-      toast.error("Échec de l'ajout du produit : " + error);
+      toast.error("Échec de l'ajout du produit");
+      console.error(error);
     }
   };
 
@@ -287,12 +279,13 @@ export default function StockPage() {
       loadData();
       closeModal();
     } catch (error) {
-      toast.error("Échec de la modification : " + error);
+      toast.error("Échec de la modification");
+      console.error(error);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!supabase || !confirm("Êtes-vous sûr de vouloir supprimer ce produit ? Cette action est irréversible.")) return;
+    if (!supabase || !confirm("Êtes-vous sûr de vouloir supprimer ce produit ?")) return;
     
     setDeletingId(id);
     try {
@@ -301,7 +294,7 @@ export default function StockPage() {
       setAllProducts(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       toast.error("Échec de la suppression.");
-      console.error("Erreur lors de la suppression:", err);
+      console.error(err);
     } finally {
       setDeletingId(null);
     }
@@ -341,9 +334,11 @@ export default function StockPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
         <div className="text-center">
-          <Warehouse className="w-16 h-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
+          <div className="p-6 bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6">
+            <Warehouse className="w-16 h-16 text-blue-600 dark:text-blue-400" />
+          </div>
           <p className="text-lg text-gray-600 dark:text-gray-400">Veuillez vous connecter.</p>
         </div>
       </div>
@@ -351,37 +346,38 @@ export default function StockPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50/50 via-white to-indigo-50/50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
       <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Header amélioré */}
+        {/* Header moderne avec gradient */}
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
-            <div className="p-4 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-xl">
-              <Warehouse className="w-10 h-10 text-white" />
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl blur-lg opacity-50"></div>
+              <div className="relative p-4 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-xl">
+                <Warehouse className="w-10 h-10 text-white" />
+              </div>
             </div>
             <div>
-              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 Inventaire Stock
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                {stockProducts.length} produit{stockProducts.length > 1 ? 's' : ''} en stock
+                {stockProducts.length} produit{stockProducts.length > 1 ? 's' : ''} en stock • {stats?.totalQuantity || 0} items
               </p>
             </div>
           </div>
         </div>
 
-        {/* Stats Cards améliorées */}
+        {/* Stats Cards modernes */}
         {initialLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
+            {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
           </div>
-        ) : stockProducts.length > 0 ? (
+        ) : stockProducts.length > 0 && stats ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-indigo-100 dark:border-indigo-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            {/* Total Produits */}
+            <div className="bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
@@ -390,17 +386,16 @@ export default function StockPage() {
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalProducts}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    articles différents
-                  </p>
+                  <p className="text-xs text-gray-500 mt-2">articles différents</p>
                 </div>
-                <div className="p-4 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-xl shadow-md">
-                  <Package className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+                <div className="p-4 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-xl shadow-md">
+                  <Package className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            {/* Total Quantité */}
+            <div className="bg-gradient-to-br from-white to-indigo-50 dark:from-gray-800 dark:to-indigo-900/20 rounded-2xl shadow-xl p-6 border border-indigo-100 dark:border-indigo-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
@@ -409,28 +404,25 @@ export default function StockPage() {
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalQuantity}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    unités en stock
-                  </p>
+                  <p className="text-xs text-gray-500 mt-2">unités en stock</p>
                 </div>
-                <div className="p-4 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 rounded-xl shadow-md">
-                  <Warehouse className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                <div className="p-4 bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/30 dark:to-indigo-800/30 rounded-xl shadow-md">
+                  <Warehouse className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-green-100 dark:border-green-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            {/* Valeur Estimée */}
+            <div className="bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 rounded-2xl shadow-xl p-6 border border-green-100 dark:border-green-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                    Valeur Estimée
+                    Valeur Stock
                   </p>
                   <p className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white truncate">
                     {formatCurrency(stats.totalValue)} Ar
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    prix estimé total en MGA
-                  </p>
+                  <p className="text-xs text-gray-500 mt-2">valeur d'achat totale</p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-xl shadow-md flex-shrink-0">
                   <TrendingUp className="w-7 h-7 text-green-600 dark:text-green-400" />
@@ -438,7 +430,8 @@ export default function StockPage() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-red-100 dark:border-red-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            {/* Stock Critique */}
+            <div className="bg-gradient-to-br from-white to-red-50 dark:from-gray-800 dark:to-red-900/20 rounded-2xl shadow-xl p-6 border border-red-100 dark:border-red-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
@@ -447,9 +440,7 @@ export default function StockPage() {
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.lowStockCount}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    produits à réapprovisionner
-                  </p>
+                  <p className="text-xs text-gray-500 mt-2">à réapprovisionner</p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-red-800/30 rounded-xl shadow-md">
                   <AlertTriangle className="w-7 h-7 text-red-600 dark:text-red-400" />
@@ -459,8 +450,8 @@ export default function StockPage() {
           </div>
         ) : null}
 
-        {/* Barre de Contrôle améliorée */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+        {/* Barre de Contrôle moderne */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 p-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
           <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -469,7 +460,7 @@ export default function StockPage() {
                 placeholder="Rechercher par nom ou description..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full p-3 pl-10 border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm text-gray-900 dark:text-white"
+                className="w-full p-3 pl-10 border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm text-gray-900 dark:text-white"
                 disabled={initialLoading || !!dataError}
               />
             </div>
@@ -480,7 +471,7 @@ export default function StockPage() {
                 onClick={() => setViewMode('grid')}
                 className={`p-2 rounded-lg transition-all ${
                   viewMode === 'grid' 
-                    ? 'bg-white dark:bg-gray-600 shadow-md text-indigo-600 dark:text-indigo-400' 
+                    ? 'bg-white dark:bg-gray-600 shadow-md text-blue-600 dark:text-blue-400' 
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
@@ -490,7 +481,7 @@ export default function StockPage() {
                 onClick={() => setViewMode('table')}
                 className={`p-2 rounded-lg transition-all ${
                   viewMode === 'table' 
-                    ? 'bg-white dark:bg-gray-600 shadow-md text-indigo-600 dark:text-indigo-400' 
+                    ? 'bg-white dark:bg-gray-600 shadow-md text-blue-600 dark:text-blue-400' 
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
@@ -501,7 +492,7 @@ export default function StockPage() {
           
           <button
             onClick={() => openModal()}
-            className="flex items-center bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 text-sm font-bold whitespace-nowrap"
+            className="flex items-center bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl shadow-xl hover:shadow-2xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50 text-sm font-bold whitespace-nowrap"
             disabled={initialLoading || !!dataError} 
           >
             <Plus className="w-5 h-5 mr-2" />
@@ -536,7 +527,7 @@ export default function StockPage() {
             </div>
           )
         ) : dataError ? (
-          <div className="text-center py-12 bg-red-50 dark:bg-red-900/20 rounded-2xl shadow-xl border border-red-200 dark:border-red-800">
+          <div className="text-center py-12 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 rounded-2xl shadow-xl border border-red-200 dark:border-red-800">
             <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-red-700 dark:text-red-400 mb-2">Erreur de Chargement</h2>
             <p className="text-red-500 dark:text-red-300 mb-6">{dataError}</p>
@@ -548,15 +539,18 @@ export default function StockPage() {
             </button>
           </div>
         ) : stockProducts.length === 0 && searchTerm === '' ? (
-          <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
-            <div className="p-6 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <Warehouse className="w-16 h-16 text-indigo-600 dark:text-indigo-400" />
+          <div className="text-center py-20 bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+            <div className="relative inline-block mb-6">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full blur-xl opacity-20"></div>
+              <div className="relative p-6 bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-full">
+                <Warehouse className="w-16 h-16 text-blue-600 dark:text-blue-400" />
+              </div>
             </div>
             <h2 className="text-3xl font-bold text-gray-700 dark:text-gray-300 mb-2">Stock vide</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6">Ajoutez votre premier produit en stock pour commencer.</p>
             <button
               onClick={() => openModal()}
-              className="inline-flex items-center bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-colors shadow-md"
+              className="inline-flex items-center bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl hover:shadow-2xl transition-all shadow-lg font-semibold"
             >
               <Plus className="w-5 h-5 mr-2" />
               Ajouter un produit
@@ -585,9 +579,9 @@ export default function StockPage() {
               ))}
             </div>
 
-            {/* Pagination pour la vue grille */}
+            {/* Pagination moderne */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+              <div className="flex items-center justify-between bg-gradient-to-r from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
                 <div className="text-sm text-gray-700 dark:text-gray-300">
                   Page <span className="font-bold">{currentPage}</span> sur <span className="font-bold">{totalPages}</span>
                   <span className="ml-2 text-gray-500 dark:text-gray-400">
@@ -623,7 +617,7 @@ export default function StockPage() {
                           onClick={() => setCurrentPage(pageNum)}
                           className={`px-4 py-2 rounded-lg font-bold transition-all shadow-md ${
                             currentPage === pageNum
-                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white scale-105'
+                              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white scale-105'
                               : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                         >
@@ -687,7 +681,7 @@ export default function StockPage() {
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {paginatedProducts.map((product) => (
-                    <tr key={product.id} className="hover:bg-gradient-to-r hover:from-indigo-50 hover:to-purple-50 dark:hover:from-gray-700/50 dark:hover:to-gray-700/50 transition-colors">
+                    <tr key={product.id} className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-gray-700/50 dark:hover:to-gray-700/50 transition-colors">
                       <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
                         <div className="max-w-xs">
                           <div className="font-bold truncate">{product.name}</div>
@@ -743,9 +737,9 @@ export default function StockPage() {
               </table>
             </div>
 
-            {/* Pagination pour la vue tableau */}
+            {/* Pagination pour vue tableau */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between bg-white dark:bg-gray-800 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+              <div className="flex items-center justify-between bg-gradient-to-r from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 px-6 py-4 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
                 <div className="text-sm text-gray-700 dark:text-gray-300">
                   Page <span className="font-bold">{currentPage}</span> sur <span className="font-bold">{totalPages}</span>
                   <span className="ml-2 text-gray-500 dark:text-gray-400">
@@ -757,7 +751,7 @@ export default function StockPage() {
                   <button
                     onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                     disabled={currentPage === 1}
-                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 disabled:opacity-50 transition-all font-semibold shadow-md"
                   >
                     Précédent
                   </button>
@@ -781,7 +775,7 @@ export default function StockPage() {
                           onClick={() => setCurrentPage(pageNum)}
                           className={`px-4 py-2 rounded-lg font-bold transition-all shadow-md ${
                             currentPage === pageNum
-                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white scale-105'
+                              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white scale-105'
                               : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                           }`}
                         >
@@ -794,7 +788,7 @@ export default function StockPage() {
                   <button
                     onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold shadow-md"
+                    className="px-4 py-2 bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:from-gray-200 hover:to-gray-300 disabled:opacity-50 transition-all font-semibold shadow-md"
                   >
                     Suivant
                   </button>
@@ -804,7 +798,7 @@ export default function StockPage() {
           </>
         )}
 
-        {/* Modal de création/édition de produit */}
+        {/* Modals */}
         <ProductFormModal
           isOpen={modalOpen}
           onClose={closeModal}
@@ -814,7 +808,6 @@ export default function StockPage() {
           exchangeRates={exchangeRates}
         />
 
-        {/* Modal de gestion des items */}
         {selectedProductForItems && (
           <ProductItemsModal
             isOpen={itemsModalOpen}

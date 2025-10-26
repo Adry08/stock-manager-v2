@@ -1,10 +1,12 @@
-// app/dashboard/page.tsx - DASHBOARD REVENDEUR COMPLET (Corrigé)
+// app/dashboard/page.tsx - VERSION MISE À JOUR avec calculs centralisés
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Product, ProductFormData, Settings, Currency } from "@/types";
+import { Product, ProductFormData, Currency } from "@/types";
+import { ProductItem } from "@/types/productItem";
 import { getProducts, updateProduct, deleteProduct, createProduct, ensureSettings } from "@/services/products";
-import { Plus, Package, RefreshCw, TrendingUp, Percent, Archive, Warehouse, Truck, Coins, DollarSign, TrendingDown, ShoppingCart, Target, Zap, MinusCircle } from "lucide-react";
+import { calculateGlobalStats, GlobalStats } from "@/services/calculations";
+import { Plus, Package, RefreshCw, Warehouse, Truck, Archive, TrendingUp, TrendingDown, Percent, Target, Zap, ShoppingCart, Coins, DollarSign, MinusCircle } from "lucide-react";
 import ProductCard from "@/components/ProductCard";
 import ProductFormModal from "@/components/modals/ProductFormModal";
 import SkeletonLoader from "@/components/SkeletonLoader";
@@ -12,41 +14,22 @@ import KpiCard from "@/components/KpiCard";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ValueChart, { EvolutionData } from "@/components/ValueChart";
-import { convertProductsToDefaultCurrency, formatPrice, convertToDefaultCurrency } from "@/services/currency";
-
-// CORRECTION : Définition d'un type pour les statistiques pour le useState
-type ResellerStats = {
-  totalItems: number;
-  stockItems: number;
-  livraisonItems: number;
-  venduItems: number;
-  totalProducts: number;
-  totalPurchaseValue: number;
-  stockPurchaseValue: number;
-  totalEstimatedSaleValue: number;
-  stockEstimatedValue: number;
-  realRevenue: number;
-  realCost: number; // Ajouté pour le KPI
-  realProfit: number;
-  potentialProfit: number;
-  totalPotential: number;
-  averageMargin: number;
-  rotationRate: number;
-};
 
 export default function DashboardPage() {
   const { user, supabase } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
+  const [allItems, setAllItems] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<{ 
+    default_currency: Currency; 
+    exchange_rates: Record<Currency, number>; 
+  } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [evolutionData, setEvolutionData] = useState<EvolutionData[]>([]);
-
-  // CORRECTION : Ajout d'un useState pour les statistiques calculées en async
-  const [resellerStats, setResellerStats] = useState<ResellerStats | null>(null);
+  const [stats, setStats] = useState<GlobalStats | null>(null);
 
   const defaultCurrency = (settings?.default_currency || "MGA") as Currency;
   const exchangeRates = useMemo<Record<Currency, number>>(() => {
@@ -56,162 +39,57 @@ export default function DashboardPage() {
     return settings.exchange_rates as Record<Currency, number>;
   }, [settings?.exchange_rates]);
 
-  // Produits par statut (inchangé)
-  const productsByStatus = useMemo(() => {
-    return {
-      stock: products.filter(p => p.status === 'stock'),
-      livraison: products.filter(p => p.status === 'livraison'),
-      vendu: products.filter(p => p.status === 'vendu'),
-    };
-  }, [products]);
-
-  // ----------------------------------------------------------------
-  // CORRECTION : Logique des statistiques déplacée de useMemo vers useEffect
-  // Ceci est nécessaire car useMemo ne peut pas être 'async'
-  // ----------------------------------------------------------------
+  // Calcul des stats avec le service centralisé
   useEffect(() => {
-    const calculateStats = async () => {
-      if (products.length === 0 || !settings) {
-        setResellerStats(null);
+    const computeStats = async () => {
+      if (products.length === 0 || allItems.length === 0 || !settings) {
+        setStats(null);
         return;
       }
 
-      // Comptage des items par statut
-      const totalItems = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
-      const stockItems = productsByStatus.stock.reduce((sum, p) => sum + (p.quantity || 0), 0);
-      const livraisonItems = productsByStatus.livraison.reduce((sum, p) => sum + (p.quantity || 0), 0);
-      const venduItems = productsByStatus.vendu.reduce((sum, p) => sum + (p.quantity || 0), 0);
-
-      // Valeur totale d'achat (tout l'inventaire en MGA)
-      let totalPurchaseValue = 0;
-      // CORRECTION : Utilisation de 'for...of' pour permettre 'await'
-      for (const p of products) {
-        const qty = p.quantity || 0;
-        const purchasePrice = p.purchase_price || 0;
-        const convertedPrice = await convertToDefaultCurrency(
-          purchasePrice,
-          (p.currency || defaultCurrency) as Currency,
+      try {
+        const globalStats = await calculateGlobalStats(
+          products,
+          allItems,
           defaultCurrency,
           exchangeRates
         );
-        totalPurchaseValue += convertedPrice * qty;
+        setStats(globalStats);
+      } catch (error) {
+        console.error("Erreur calcul des stats:", error);
       }
-
-      // Valeur estimée de vente (tout l'inventaire)
-      let totalEstimatedSaleValue = 0;
-      products.forEach(p => {
-        const qty = p.quantity || 0;
-        const salePrice = p.estimated_selling_price || 0;
-        totalEstimatedSaleValue += salePrice * qty;
-      });
-
-      // Valeur stock uniquement (en MGA)
-      let stockPurchaseValue = 0;
-      let stockEstimatedValue = 0;
-      // CORRECTION : Utilisation de 'for...of' pour permettre 'await'
-      for (const p of productsByStatus.stock) {
-        const qty = p.quantity || 0;
-        const purchasePrice = p.purchase_price || 0;
-        const convertedPrice = await convertToDefaultCurrency(
-          purchasePrice,
-          (p.currency || defaultCurrency) as Currency,
-          defaultCurrency,
-          exchangeRates
-        );
-        stockPurchaseValue += convertedPrice * qty;
-        stockEstimatedValue += (p.estimated_selling_price || 0) * qty;
-      }
-
-      // Revenu réel (produits vendus)
-      let realRevenue = 0;
-      let realCost = 0;
-      // CORRECTION : Utilisation de 'for...of' pour permettre 'await'
-      for (const p of productsByStatus.vendu) {
-        const qty = p.quantity || 0;
-        const purchasePrice = p.purchase_price || 0;
-        const convertedPrice = await convertToDefaultCurrency(
-          purchasePrice,
-          (p.currency || defaultCurrency) as Currency,
-          defaultCurrency,
-          exchangeRates
-        );
-        realCost += convertedPrice * qty;
-        // Utilise le prix de vente réel s'il existe, sinon l'estimé
-        realRevenue += (p.selling_price || p.estimated_selling_price || 0) * qty;
-      }
-
-      const realProfit = realRevenue - realCost;
-
-      // Gain potentiel sur stock
-      const potentialProfit = stockEstimatedValue - stockPurchaseValue;
-      
-      // Gain total (réel + potentiel)
-      const totalPotential = realProfit + potentialProfit;
-
-      // Marge moyenne globale
-      const totalValidProducts = products.filter(p =>
-        p.purchase_price && p.purchase_price > 0 &&
-        p.estimated_selling_price && p.estimated_selling_price > 0
-      );
-
-      let totalMarginPercentage = 0;
-      // CORRECTION : Utilisation de 'for...of' pour permettre 'await'
-      for (const p of totalValidProducts) {
-        const purchasePrice = await convertToDefaultCurrency(
-          p.purchase_price,
-          (p.currency || defaultCurrency) as Currency,
-          defaultCurrency,
-          exchangeRates
-        );
-        const salePrice = p.estimated_selling_price || 0; // Marge basée sur l'estimé
-        if (purchasePrice > 0) {
-          totalMarginPercentage += ((salePrice - purchasePrice) / purchasePrice) * 100;
-        }
-      }
-      const averageMargin = totalValidProducts.length > 0
-        ? totalMarginPercentage / totalValidProducts.length
-        : 0;
-
-      // Taux de rotation (% vendus par rapport au total)
-      const rotationRate = totalItems > 0 ? (venduItems / totalItems) * 100 : 0;
-
-      // CORRECTION : Stockage des stats dans le useState
-      setResellerStats({
-        totalItems,
-        stockItems,
-        livraisonItems,
-        venduItems,
-        totalProducts: products.length,
-        totalPurchaseValue: Math.round(totalPurchaseValue),
-        stockPurchaseValue: Math.round(stockPurchaseValue),
-        totalEstimatedSaleValue: Math.round(totalEstimatedSaleValue),
-        stockEstimatedValue: Math.round(stockEstimatedValue),
-        realRevenue: Math.round(realRevenue),
-        realCost: Math.round(realCost), // Ajouté
-        realProfit: Math.round(realProfit),
-        potentialProfit: Math.round(potentialProfit),
-        totalPotential: Math.round(totalPotential), // Ajouté
-        averageMargin: Math.round(averageMargin * 10) / 10,
-        rotationRate: Math.round(rotationRate * 10) / 10,
-      });
     };
 
-    calculateStats();
-  }, [products, productsByStatus, defaultCurrency, exchangeRates, settings]); // Dépendances du calcul
+    computeStats();
+  }, [products, allItems, settings, defaultCurrency, exchangeRates]);
 
-  // --- Fin de la correction des stats ---
+  // Produits récents (8 derniers)
+  const recentProducts = useMemo(() => products.slice(0, 8), [products]);
 
   const refreshData = useCallback(async () => {
     if (!user || !supabase) return;
     setIsRefreshing(true);
     try {
       const settingsData = await ensureSettings(user.id, supabase);
-      setSettings(settingsData);
-      const productsData = (await getProducts(supabase)) as Product[];
+      setSettings({
+        default_currency: settingsData.default_currency as Currency,
+        exchange_rates: settingsData.exchange_rates as Record<Currency, number>,
+      });
+      
+      const productsData = await getProducts(supabase);
       setProducts(productsData);
+      
+      // Récupération de tous les items
+      const { data: itemsData } = await supabase
+        .from('product_items')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      setAllItems(itemsData || []);
       toast.success("Données mises à jour");
     } catch (error) {
-      toast.error("Erreur lors du rafraîchissement : " + error);
+      toast.error("Erreur lors du rafraîchissement");
+      console.error(error);
     } finally {
       setIsRefreshing(false);
     }
@@ -221,18 +99,28 @@ export default function DashboardPage() {
     const loadData = async () => {
       if (!user || !supabase) {
         setLoading(false);
-        setProducts([]);
-        setSettings(null);
         return;
       }
       setLoading(true);
       try {
         const settingsData = await ensureSettings(user.id, supabase);
-        setSettings(settingsData);
+        setSettings({
+          default_currency: settingsData.default_currency as Currency,
+          exchange_rates: settingsData.exchange_rates as Record<Currency, number>,
+        });
+        
         const productsData = await getProducts(supabase);
         setProducts(productsData);
+        
+        const { data: itemsData } = await supabase
+          .from('product_items')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        setAllItems(itemsData || []);
       } catch (error) {
-        toast.error("Échec du chargement de l'inventaire : " + error);
+        toast.error("Échec du chargement de l'inventaire");
+        console.error(error);
       } finally {
         setLoading(false);
       }
@@ -240,88 +128,61 @@ export default function DashboardPage() {
     loadData();
   }, [user, supabase]);
 
-  // ----------------------------------------------------------------
-  // CORRECTION : Graphique d'évolution simplifié et corrigé
-  // Se base uniquement sur les produits VENDUS pour un suivi
-  // chronologique correct du profit et du volume des ventes.
-  // ----------------------------------------------------------------
+  // Génération données d'évolution (simplifiée)
   useEffect(() => {
-    const generateProfitEvolution = async () => {
-      if (productsByStatus.vendu.length === 0 || !settings || Object.keys(exchangeRates).length === 0) {
-        setEvolutionData([]);
-        return;
-      }
+    if (!stats || allItems.length === 0) {
+      setEvolutionData([]);
+      return;
+    }
 
-      const soldProducts = productsByStatus.vendu;
+    const soldItems = allItems.filter(i => i.status === 'vendu');
+    
+    if (soldItems.length === 0) {
+      setEvolutionData([]);
+      return;
+    }
 
-      // Trie les produits vendus par date (en supposant que updated_at = date de vente)
-      const sortedSoldProducts = [...soldProducts].sort((a, b) =>
-        new Date(a.updated_at || a.created_at).getTime() -
-        new Date(b.updated_at || b.created_at).getTime()
-      );
-
-      const dailyChanges: { [key: string]: { vendu: number; profit: number } } = {};
-
-      for (const product of sortedSoldProducts) {
-        const date = new Date(product.updated_at || product.created_at);
-        const dayKey = date.toISOString().split("T")[0];
-
-        if (!dailyChanges[dayKey]) {
-          dailyChanges[dayKey] = { vendu: 0, profit: 0 };
-        }
-
-        const qty = product.quantity || 1;
-        const purchasePrice = await convertToDefaultCurrency(
-          product.purchase_price || 0,
-          product.currency || defaultCurrency,
-          defaultCurrency,
-          exchangeRates
-        );
-        const sellingPrice = product.selling_price || product.estimated_selling_price || 0;
-        const profit = (sellingPrice - purchasePrice) * qty;
-        
-        dailyChanges[dayKey].vendu += qty;
-        dailyChanges[dayKey].profit += profit;
-      }
-
-      const sortedDays = Object.keys(dailyChanges).sort();
-      const cumulativeData: EvolutionData[] = [];
-      let runningTotals = { vendu: 0, profit: 0 };
-
-      // Ajoute un point de départ
-      cumulativeData.push({ date: "Début", stock: 0, livraison: 0, vendu: 0, profit: 0 });
-
-      for (const dayKey of sortedDays) {
-        runningTotals.vendu += dailyChanges[dayKey].vendu;
-        runningTotals.profit += dailyChanges[dayKey].profit;
-
-        cumulativeData.push({
-          date: new Date(dayKey).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
-          stock: 0, // Simplifié : on ne montre que les ventes et le profit
-          livraison: 0, // Simplifié
-          vendu: runningTotals.vendu,
-          profit: Math.round(runningTotals.profit),
-        });
+    // Grouper par date
+    const dailyChanges: { [key: string]: { vendu: number; profit: number } } = {};
+    
+    soldItems.forEach(item => {
+      const product = products.find(p => p.id === item.product_id);
+      if (!product) return;
+      
+      const date = new Date(item.updated_at || item.created_at);
+      const dayKey = date.toISOString().split("T")[0];
+      
+      if (!dailyChanges[dayKey]) {
+        dailyChanges[dayKey] = { vendu: 0, profit: 0 };
       }
       
-      // Gère le cas où il n'y a qu'un seul jour de données (en plus de "Début")
-      if (cumulativeData.length === 2) {
-         setEvolutionData(cumulativeData);
-      } else if (cumulativeData.length > 2) {
-         setEvolutionData(cumulativeData);
-      } else {
-         // Si "Début" est le seul point, n'affiche rien
-         setEvolutionData([]);
-      }
-    };
+      dailyChanges[dayKey].vendu += 1;
+      
+      const sellingPrice = item.selling_price || product.selling_price || product.estimated_selling_price || 0;
+      const purchasePrice = product.purchase_price || 0;
+      dailyChanges[dayKey].profit += (sellingPrice - purchasePrice);
+    });
 
-    generateProfitEvolution();
-  }, [productsByStatus.vendu, settings, defaultCurrency, exchangeRates]); // Se base que sur les produits vendus
-
-  // --- Fin de la correction du graphique ---
-
-
-  const recentProducts = useMemo(() => products.slice(0, 8), [products]);
+    const sortedDays = Object.keys(dailyChanges).sort();
+    const cumulativeData: EvolutionData[] = [{ date: "Début", stock: 0, livraison: 0, vendu: 0, profit: 0 }];
+    
+    let runningTotals = { vendu: 0, profit: 0 };
+    
+    sortedDays.forEach(dayKey => {
+      runningTotals.vendu += dailyChanges[dayKey].vendu;
+      runningTotals.profit += dailyChanges[dayKey].profit;
+      
+      cumulativeData.push({
+        date: new Date(dayKey).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+        stock: 0,
+        livraison: 0,
+        vendu: runningTotals.vendu,
+        profit: Math.round(runningTotals.profit),
+      });
+    });
+    
+    setEvolutionData(cumulativeData.length > 1 ? cumulativeData : []);
+  }, [stats, allItems, products]);
 
   const openModal = (product: Product | null = null) => {
     setSelectedProduct(product);
@@ -349,22 +210,22 @@ export default function DashboardPage() {
       closeModal();
       setTimeout(() => refreshData(), 500);
     } catch (error) {
-      toast.error("Échec de la sauvegarde du produit. : " + error);
+      toast.error("Échec de la sauvegarde du produit.");
+      console.error(error);
     }
   };
 
   const handleDeleteProduct = async (id: string) => {
-    if (!supabase) {
-      toast.error("Client Supabase indisponible.");
-      return;
-    }
+    if (!supabase || !confirm("Êtes-vous sûr de vouloir supprimer ce produit ?")) return;
+    
     setDeletingProductId(id);
     try {
       await deleteProduct(id, supabase);
       toast.success("Produit supprimé !");
       setTimeout(() => refreshData(), 500);
     } catch (error) {
-      toast.error("Échec de la suppression. : " + error);
+      toast.error("Échec de la suppression.");
+      console.error(error);
     } finally {
       setDeletingProductId(null);
     }
@@ -373,7 +234,6 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="container mx-auto max-w-full p-2 sm:p-4 lg:p-8 space-y-4 pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
-        {/* CORRECTION : Augmentation du nombre de skeletons à 12 */}
         <SkeletonLoader type="kpi" count={12} className="mb-6 sm:mb-10" />
       </div>
     );
@@ -381,28 +241,36 @@ export default function DashboardPage() {
 
   return (
     <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6 pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
-      {/* Header (inchangé) */}
-      <div className="flex justify-between items-center mb-6 sm:mb-8 border-b pb-3 sm:pb-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
-            Tableau de bord Revendeur
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Vue complète de votre activité commerciale
-          </p>
+      {/* Header avec gradient moderne */}
+      <div className="flex justify-between items-center mb-6 sm:mb-8 pb-3 sm:pb-4">
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl blur-lg opacity-50"></div>
+            <div className="relative p-4 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-xl">
+              <Package className="w-10 h-10 text-white" />
+            </div>
+          </div>
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              Tableau de bord
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Vue complète de votre activité • {stats?.totalItems || 0} items au total
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
             onClick={refreshData}
             disabled={isRefreshing}
-            className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 p-2 sm:px-4 sm:py-2 rounded-full shadow hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center font-medium active:scale-[0.98] disabled:opacity-50"
+            className="bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 p-2 sm:px-4 sm:py-2 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center font-medium active:scale-95 disabled:opacity-50 border border-gray-200 dark:border-gray-700"
           >
             <RefreshCw className={`w-5 h-5 sm:mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">Actualiser</span>
           </button>
           <button
             onClick={() => openModal()}
-            className="bg-indigo-600 text-white p-2 sm:px-5 sm:py-2.5 rounded-full shadow-lg hover:bg-indigo-700 transition flex items-center font-medium active:scale-[0.98]"
+            className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-2 sm:px-5 sm:py-2.5 rounded-xl shadow-lg hover:shadow-2xl transition-all flex items-center font-semibold active:scale-95"
           >
             <Plus className="w-5 h-5 sm:mr-2" />
             <span className="hidden sm:inline">Ajouter</span>
@@ -410,32 +278,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* CORRECTION : Grille de KPI mise à jour pour 12 cartes (xl:grid-cols-6) */}
+      {/* Grille KPI avec design moderne - 12 cartes */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-4 mb-6 sm:mb-10">
         
-        {/* Ligne 1: Statuts des items */}
+        {/* Ligne 1: Items par statut */}
         <KpiCard
           title="EN STOCK"
-          value={resellerStats?.stockItems || 0}
+          value={stats?.stockItems || 0}
           icon={<Warehouse className="w-6 h-6" />}
           color="blue"
         />
         <KpiCard
           title="EN TRANSIT"
-          value={resellerStats?.livraisonItems || 0}
+          value={stats?.deliveryItems || 0}
           icon={<Truck className="w-6 h-6" />}
           color="orange"
         />
         <KpiCard
           title="VENDUS"
-          value={resellerStats?.venduItems || 0}
+          value={stats?.soldItems || 0}
           icon={<Archive className="w-6 h-6" />}
           color="green"
         />
         <KpiCard
           title="ROTATION"
-          value={resellerStats?.rotationRate || 0}
-          fullValue={resellerStats?.rotationRate || 0}
+          value={stats?.rotationRate || 0}
+          fullValue={stats?.rotationRate || 0}
           unit="%"
           icon={<Zap className="w-6 h-6" />}
           color="blue"
@@ -443,8 +311,8 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="MARGE MOY."
-          value={resellerStats?.averageMargin || 0}
-          fullValue={resellerStats?.averageMargin || 0}
+          value={stats?.averageMargin || 0}
+          fullValue={stats?.averageMargin || 0}
           unit="%"
           icon={<Percent className="w-6 h-6" />}
           color="indigo"
@@ -452,8 +320,8 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="GAIN TOTAL"
-          value={resellerStats?.totalPotential || 0}
-          fullValue={resellerStats?.totalPotential || 0}
+          value={stats?.totalPotentialProfit || 0}
+          fullValue={stats?.totalPotentialProfit || 0}
           unit="Ar"
           icon={<Target className="w-6 h-6" />}
           color="purple"
@@ -461,10 +329,10 @@ export default function DashboardPage() {
         />
 
         {/* Ligne 2: Valeurs et Gains */}
-         <KpiCard
+        <KpiCard
           title="ACHAT TOTAL"
-          value={resellerStats?.totalPurchaseValue || 0}
-          fullValue={resellerStats?.totalPurchaseValue || 0}
+          value={stats?.totalPurchaseValue || 0}
+          fullValue={stats?.totalPurchaseValue || 0}
           unit="Ar"
           icon={<ShoppingCart className="w-6 h-6" />}
           color="gray"
@@ -472,8 +340,8 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="VALEUR STOCK"
-          value={resellerStats?.stockPurchaseValue || 0}
-          fullValue={resellerStats?.stockPurchaseValue || 0}
+          value={stats?.stockPurchaseValue || 0}
+          fullValue={stats?.stockPurchaseValue || 0}
           unit="Ar"
           icon={<Coins className="w-6 h-6" />}
           color="yellow"
@@ -481,17 +349,17 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="COÛT VENDUS"
-          value={resellerStats?.realCost || 0}
-          fullValue={resellerStats?.realCost || 0}
+          value={stats?.soldPurchaseCost || 0}
+          fullValue={stats?.soldPurchaseCost || 0}
           unit="Ar"
           icon={<MinusCircle className="w-6 h-6" />}
           color="red"
           expandable={true}
         />
-         <KpiCard
+        <KpiCard
           title="REVENU RÉEL"
-          value={resellerStats?.realRevenue || 0}
-          fullValue={resellerStats?.realRevenue || 0}
+          value={stats?.actualRevenue || 0}
+          fullValue={stats?.actualRevenue || 0}
           unit="Ar"
           icon={<DollarSign className="w-6 h-6" />}
           color="green"
@@ -499,60 +367,98 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="GAIN RÉEL"
-          value={resellerStats?.realProfit || 0}
-          fullValue={resellerStats?.realProfit || 0}
+          value={stats?.realizedProfit || 0}
+          fullValue={stats?.realizedProfit || 0}
           unit="Ar"
           icon={<TrendingUp className="w-6 h-6" />}
-          color={(resellerStats?.realProfit || 0) >= 0 ? "green" : "red"}
+          color={(stats?.realizedProfit || 0) >= 0 ? "green" : "red"}
           expandable={true}
         />
         <KpiCard
           title="GAIN POTENTIEL"
-          value={resellerStats?.potentialProfit || 0}
-          fullValue={resellerStats?.potentialProfit || 0}
+          value={stats?.potentialProfit || 0}
+          fullValue={stats?.potentialProfit || 0}
           unit="Ar"
-          icon={<TrendingDown className="w-6 h-6" />} // Potentiel = pas encore réalisé
+          icon={<TrendingDown className="w-6 h-6" />}
           color="blue"
           expandable={true}
         />
       </div>
 
-      {/* Graphique (inchangé, il lira les nouvelles 'evolutionData') */}
-      <div className="mb-6 sm:mb-10 bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg">
-        <h2 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200 mb-3 sm:mb-4 border-b pb-2 sm:pb-3">
-          Évolution des Ventes et Bénéfices (Cumulés)
-        </h2>
+      {/* Graphique avec design moderne */}
+      <div className="mb-6 sm:mb-10 bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 p-4 sm:p-6 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-gradient-to-br from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 rounded-xl">
+            <TrendingUp className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-gray-200">
+              Évolution des Ventes et Bénéfices
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Suivi cumulé de vos performances
+            </p>
+          </div>
+        </div>
         <ValueChart data={evolutionData} defaultCurrency={defaultCurrency} />
       </div>
 
-      {/* Produits récents (inchangé) */}
-      <h2 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4 border-b pb-2 sm:pb-3">
-        8 derniers produits ajoutés
-      </h2>
-      {recentProducts.length === 0 ? (
-        <div className="text-center py-8 sm:py-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
-          <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <p className="text-base sm:text-lg text-gray-600 dark:text-gray-400 font-medium">
-            Aucun produit n&apos;a été ajouté pour l&apos;instant.
-          </p>
+      {/* Section produits récents avec design amélioré */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-xl">
+              <Package className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-gray-200">
+              Derniers produits ajoutés
+            </h2>
+          </div>
+          <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+            {recentProducts.length} produit{recentProducts.length > 1 ? 's' : ''}
+          </span>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {recentProducts.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              onEdit={openModal}
-              onDelete={handleDeleteProduct}
-              isDeleting={deletingProductId === product.id}
-              defaultCurrency={defaultCurrency}
-              exchangeRates={exchangeRates}
-            />
-          ))}
-        </div>
-      )}
 
-      {/* Modale (inchangée) */}
+        {recentProducts.length === 0 ? (
+          <div className="text-center py-16 bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
+            <div className="relative inline-block mb-6">
+              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full blur-xl opacity-20"></div>
+              <div className="relative p-6 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 rounded-full">
+                <Package className="w-16 h-16 text-indigo-600 dark:text-indigo-400" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-gray-700 dark:text-gray-300 mb-2">
+              Aucun produit
+            </h3>
+            <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+              Commencez à ajouter des produits pour suivre votre inventaire
+            </p>
+            <button
+              onClick={() => openModal()}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-2xl transition-all font-semibold active:scale-95"
+            >
+              <Plus className="w-5 h-5" />
+              Ajouter un produit
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+            {recentProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onEdit={openModal}
+                onDelete={handleDeleteProduct}
+                isDeleting={deletingProductId === product.id}
+                defaultCurrency={defaultCurrency}
+                exchangeRates={exchangeRates}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modale avec style amélioré */}
       <ProductFormModal
         isOpen={isModalOpen}
         onClose={closeModal}

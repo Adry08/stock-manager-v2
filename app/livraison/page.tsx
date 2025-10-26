@@ -1,19 +1,17 @@
-// app/livraison/page.tsx - VERSION CORRIGÉE avec calculs basés sur les ITEMS en livraison
+// app/livraison/page.tsx - VERSION MISE À JOUR avec calculs centralisés
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Product, Currency, ProductFormData} from "@/types";
+import { Product, Currency, ProductFormData } from "@/types";
 import { ProductItem } from "@/types/productItem";
 import { Client, ClientFormData } from "@/types/client";
 import ProductCard from "@/components/ProductCard";
 import ProductItemsModal from "@/components/modals/ProductItemsModal";
 import { getProducts, ensureSettings, updateProduct } from "@/services/products";
-import { 
-  getProductItems, 
-  updateMultipleItemsStatus
-} from "@/services/productItems";
+import { getProductItems, updateMultipleItemsStatus } from "@/services/productItems";
 import { getAllClients, getClientByProductId, createClient, updateClient, deleteClient } from "@/services/clients";
-import { Truck, Package, Clock, TrendingUp, Filter, X } from "lucide-react";
+import { calculateDeliveryStats, PageSpecificStats } from "@/services/calculations";
+import { Truck, Package, Clock, TrendingUp, Filter, X, MapPin, Calendar as CalendarIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ProductFormModal from "@/components/modals/ProductFormModal";
@@ -22,8 +20,7 @@ import DeliveryCalendar from "@/components/DeliveryCalendar";
 import { Button } from "@/components/ui/button";
 import MobileCalendarSheet from "@/components/MobileCalendarSheet";
 
-// (Le code des Skeletons reste inchangé)
-
+// Skeletons
 const StatCardSkeleton = () => (
   <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 animate-pulse">
     <div className="flex items-center justify-between">
@@ -52,10 +49,6 @@ const ProductCardSkeleton = () => (
         <div className="h-7 bg-gray-300 dark:bg-gray-600 rounded w-24"></div>
         <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded w-16"></div>
       </div>
-      <div className="flex gap-2 pt-2">
-        <div className="h-9 bg-gray-200 dark:bg-gray-700 rounded flex-1"></div>
-        <div className="h-9 bg-gray-200 dark:bg-gray-700 rounded flex-1"></div>
-      </div>
     </div>
   </div>
 );
@@ -71,9 +64,6 @@ const CalendarSkeleton = () => (
   </div>
 );
 
-// --- Début des modifications majeures ---
-
-// Nouveau type pour les produits enrichis avec la quantité réelle en livraison
 type DeliveryProduct = Product & {
   delivery_quantity: number;
 };
@@ -81,7 +71,6 @@ type DeliveryProduct = Product & {
 export default function LivraisonPage() {
   const { user, supabase } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
-  // NOUVEL ÉTAT pour stocker tous les items en statut 'livraison'
   const [deliveryItems, setDeliveryItems] = useState<ProductItem[]>([]);
   const [allClients, setAllClients] = useState<Client[]>([]);
   const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
@@ -100,9 +89,8 @@ export default function LivraisonPage() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [showCalendar] = useState(false);
+  const [stats, setStats] = useState<PageSpecificStats | null>(null);
 
-  // États pour la gestion unitaire des items
   const [itemsModalOpen, setItemsModalOpen] = useState(false);
   const [selectedProductForItems, setSelectedProductForItems] = useState<Product | null>(null);
   const [productItems, setProductItems] = useState<ProductItem[]>([]);
@@ -116,7 +104,7 @@ export default function LivraisonPage() {
     return settings.exchange_rates as Record<Currency, number>;
   }, [settings?.exchange_rates]);
 
-  // NOUVEAU: Liste des produits enrichis avec la quantité réelle d'items en livraison
+  // Produits enrichis avec quantité d'items en livraison
   const deliveryProductsWithQuantities = useMemo<DeliveryProduct[]>(() => {
     const itemCounts = deliveryItems.reduce((acc, item) => {
       acc[item.product_id] = (acc[item.product_id] || 0) + 1;
@@ -124,54 +112,48 @@ export default function LivraisonPage() {
     }, {} as Record<string, number>);
 
     return allProducts
-      .filter(p => itemCounts[p.id] > 0) // Ne garde que les produits qui ont au moins 1 item en livraison
+      .filter(p => itemCounts[p.id] > 0)
       .map(p => ({
         ...p,
-        // La quantité affichée doit être la quantité réelle d'items en livraison
         delivery_quantity: itemCounts[p.id] || 0,
-        // On conserve la 'quantity' originale pour d'autres usages, mais on se base sur delivery_quantity pour l'affichage
       })) as DeliveryProduct[];
   }, [allProducts, deliveryItems]);
 
-
-  // REMPLACEMENT de deliveryProducts par deliveryProductsWithQuantities
   const deliveryProducts = deliveryProductsWithQuantities;
-
 
   const filteredProducts = useMemo(() => {
     if (!selectedDate) return deliveryProducts;
     
-    // FILTRAGE basé sur les clients
     const clientsForDate = allClients.filter(c => c.delivery_date === selectedDate);
     const productIdsForDate = clientsForDate.map(c => c.product_id);
     
     return deliveryProducts.filter(p => productIdsForDate.includes(p.id));
   }, [deliveryProducts, allClients, selectedDate]);
 
-  const convertToDefaultCurrency = useCallback((amount: number, fromCurrency: Currency): number => {
-    if (fromCurrency === defaultCurrency) return amount;
-    const rateFrom = exchangeRates[fromCurrency] || 1;
-    const rateTo = exchangeRates[defaultCurrency] || 1;
-    const amountInEUR = amount / rateFrom;
-    return amountInEUR * rateTo;
-  }, [defaultCurrency, exchangeRates]);
+  // Calcul des stats avec le service centralisé
+  useEffect(() => {
+    const computeStats = async () => {
+      if (!settings || deliveryItems.length === 0) {
+        setStats(null);
+        return;
+      }
 
-  // CORRECTION: Calcul des stats sur TOUS les produits en livraison, basé sur delivery_quantity
-  const stats = useMemo(() => {
-    const totalProducts = deliveryProducts.length; 
-    const totalValue = deliveryProducts.reduce((sum, p) => {
-      // Utilise la delivery_quantity pour le calcul de la valeur totale
-      const price = p.purchase_price || 0;
-      const qty = p.delivery_quantity || 0; // UTILISE delivery_quantity
-      const productValue = price * qty;
-      const convertedValue = convertToDefaultCurrency(productValue, p.currency as Currency);
-      return sum + convertedValue;
-    }, 0);
-    // Utilise la delivery_quantity pour la quantité totale
-    const totalQuantity = deliveryProducts.reduce((sum, p) => sum + (p.delivery_quantity || 0), 0); 
-    
-    return { totalProducts, totalValue, totalQuantity };
-  }, [deliveryProducts, convertToDefaultCurrency]); 
+      try {
+        const deliveryStats = await calculateDeliveryStats(
+          allProducts,
+          deliveryItems,
+          allClients,
+          defaultCurrency,
+          exchangeRates
+        );
+        setStats(deliveryStats);
+      } catch (error) {
+        console.error("Erreur calcul stats livraison:", error);
+      }
+    };
+
+    computeStats();
+  }, [allProducts, deliveryItems, allClients, settings, defaultCurrency, exchangeRates]);
   
   const loadData = useCallback(async () => {
     if (!user || !supabase) {
@@ -188,28 +170,24 @@ export default function LivraisonPage() {
         exchange_rates: settingsData.exchange_rates as Record<Currency, number>,
       });
 
-      // MODIFICATION: Fetch en parallèle des produits, des clients, ET des items en livraison
       const [productsData, clientsData, itemsResult] = await Promise.all([
-        getProducts(supabase), // Récupère tous les produits de la base (potentiellement tous statuts)
+        getProducts(supabase),
         getAllClients(supabase),
-        // Requête directe pour récupérer tous les items en statut 'livraison'
-        supabase.from('product_items').select('*').eq('status', 'livraison'), 
+        supabase.from('product_items').select('*').eq('status', 'livraison'),
       ]);
       
       setAllProducts(productsData);
       setAllClients(clientsData);
-      setDeliveryItems(itemsResult.data || []); // Stocke les items en livraison
+      setDeliveryItems(itemsResult.data || []);
     } catch (err) {
       toast.error("Erreur lors du chargement des données.");
-      console.error("Erreur:", err);
+      console.error(err);
     } finally {
       setLoading(false);
     }
   }, [user, supabase]);
 
-  // Ouvrir la modal de gestion des items
   const handleManageItems = async (product: Product) => {
-    // Reste inchangé, il faut toujours charger tous les items pour cette modal.
     if (!supabase) return;
     
     setSelectedProductForItems(product);
@@ -227,26 +205,15 @@ export default function LivraisonPage() {
     }
   };
 
-  // Mettre à jour plusieurs items (permet de passer en vendu)
   const handleUpdateItems = async (itemIds: string[], newStatus: string) => {
-    // Reste inchangé, mais on s'assure de recharger les données après.
     if (!supabase || !selectedProductForItems) return;
 
     try {
-      await updateMultipleItemsStatus(
-        itemIds, 
-        newStatus as 'stock' | 'livraison' | 'vendu',
-        supabase
-      );
-
-      // Recharger les items de la modal
+      await updateMultipleItemsStatus(itemIds, newStatus as 'stock' | 'livraison' | 'vendu', supabase);
       const updatedItems = await getProductItems(selectedProductForItems.id, supabase);
       setProductItems(updatedItems);
-
-      // Recharger TOUTES les données pour mettre à jour la liste deliveryProductsWithQuantities et les stats
       await loadData();
       
-      // Message personnalisé selon le nouveau statut
       if (newStatus === 'vendu') {
         toast.success(`${itemIds.length} item(s) marqué(s) comme vendu(s) !`);
       } else if (newStatus === 'stock') {
@@ -259,7 +226,6 @@ export default function LivraisonPage() {
     }
   };
 
-  // Fermer la modal des items
   const closeItemsModal = () => {
     setItemsModalOpen(false);
     setSelectedProductForItems(null);
@@ -270,14 +236,14 @@ export default function LivraisonPage() {
     if (!user || !supabase || !editingProduct) return;
     
     try {
-      // NOTE: La modification d'un produit ne doit pas écraser la 'quantity' agrégée
       const updatedProduct = { ...editingProduct, ...values } as Product;
       await updateProduct(updatedProduct, user.id, supabase);
       toast.success("Produit modifié !");
       loadData();
       closeModal();
     } catch (error) {
-      toast.error("Échec de la modification : " + error);
+      toast.error("Échec de la modification");
+      console.error(error);
     }
   };
 
@@ -290,14 +256,13 @@ export default function LivraisonPage() {
       setSelectedClient(client);
       setClientModalOpen(true);
     } catch (error) {
-      console.error("Erreur lors de la récupération du client:", error);
+      console.error(error);
       setSelectedProduct(product);
       setSelectedClient(null);
       setClientModalOpen(true);
     }
   };
 
-  // Le reste des fonctions (handleClientSubmit, handleClientDelete, openModal, closeModal, formatCurrency, getCurrencySymbol, hasClient) reste inchangé
   const handleClientSubmit = async (data: ClientFormData) => {
     if (!user || !supabase || !selectedProduct) return;
 
@@ -371,12 +336,13 @@ export default function LivraisonPage() {
     return allClients.some(c => c.product_id === productId);
   }, [allClients]);
 
-
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50 dark:from-gray-900 dark:to-gray-800">
         <div className="text-center">
-          <Truck className="w-16 h-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
+          <div className="p-6 bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/30 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6">
+            <Truck className="w-16 h-16 text-orange-600 dark:text-orange-400" />
+          </div>
           <p className="text-lg text-gray-600 dark:text-gray-400">Veuillez vous connecter.</p>
         </div>
       </div>
@@ -387,21 +353,24 @@ export default function LivraisonPage() {
     <div className="min-h-screen bg-gradient-to-br from-orange-50/50 via-white to-amber-50/50 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300">
       <div className="container mx-auto max-w-full p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Header amélioré */}
+        {/* Header moderne avec gradient */}
         <div className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="p-4 bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl shadow-xl">
-                <Truck className="w-10 h-10 text-white" />
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl blur-lg opacity-50"></div>
+                <div className="relative p-4 bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl shadow-xl">
+                  <Truck className="w-10 h-10 text-white" />
+                </div>
               </div>
               <div>
-                <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                <h1 className="text-4xl font-extrabold bg-gradient-to-r from-orange-600 to-amber-600 bg-clip-text text-transparent">
                   Produits en Transit
                 </h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   {selectedDate 
                     ? `Livraisons du ${new Date(selectedDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`
-                    : 'Suivez vos produits en cours de livraison (basé sur les items)' // Texte mis à jour
+                    : `Suivez vos livraisons • ${stats?.totalQuantity || 0} items en transit`
                   }
                 </p>
               </div>
@@ -412,7 +381,7 @@ export default function LivraisonPage() {
                 <Button
                   variant="outline"
                   onClick={() => setSelectedDate(null)}
-                  className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex items-center gap-2 hover:bg-orange-50 dark:hover:bg-orange-900/30 border-orange-300 dark:border-orange-700"
                 >
                   <X className="w-4 h-4" />
                   <span className="hidden sm:inline">Réinitialiser</span>
@@ -422,7 +391,7 @@ export default function LivraisonPage() {
               <Button
                 variant="outline"
                 onClick={() => setIsMobileSheetOpen(true)}
-                className="flex items-center gap-2 lg:hidden"
+                className="flex items-center gap-2 lg:hidden border-orange-300 dark:border-orange-700"
               >
                 <Filter className="w-4 h-4" />
                 Calendrier
@@ -431,29 +400,24 @@ export default function LivraisonPage() {
           </div>
         </div>
 
-        {/* Stats Cards améliorées - AFFICHENT MAINTENANT TOUS LES PRODUITS EN LIVRAISON (selon items) */}
+        {/* Stats Cards modernes */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
+            {Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)}
           </div>
-        ) : deliveryProducts.length > 0 ? (
+        ) : deliveryProducts.length > 0 && stats ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-orange-100 dark:border-orange-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            <div className="bg-gradient-to-br from-white to-orange-50 dark:from-gray-800 dark:to-orange-900/20 rounded-2xl shadow-xl p-6 border border-orange-100 dark:border-orange-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                    Total Produits Uniques
+                    Produits Uniques
                   </p>
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalProducts}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    {selectedDate 
-                      ? `${filteredProducts.length} produits uniques pour cette date` 
-                      : 'articles en transit'
-                    }
+                  <p className="text-xs text-gray-500 mt-2">
+                    {selectedDate ? `${filteredProducts.length} pour cette date` : 'en transit'}
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/30 dark:to-orange-800/30 rounded-xl shadow-md">
@@ -462,19 +426,19 @@ export default function LivraisonPage() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            <div className="bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 rounded-2xl shadow-xl p-6 border border-blue-100 dark:border-blue-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                    Quantité Totale (Items)
+                    Quantité Items
                   </p>
                   <p className="text-4xl font-extrabold text-gray-900 dark:text-white">
                     {stats.totalQuantity}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 mt-2">
                     {selectedDate 
-                      ? `${filteredProducts.reduce((sum, p) => sum + (p as DeliveryProduct).delivery_quantity, 0)} unités pour cette date` 
-                      : 'unités d\'items en transit' // Texte mis à jour
+                      ? `${filteredProducts.reduce((sum, p) => sum + p.delivery_quantity, 0)} pour cette date`
+                      : 'unités en transit'
                     }
                   </p>
                 </div>
@@ -484,7 +448,7 @@ export default function LivraisonPage() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-green-100 dark:border-green-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            <div className="bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 rounded-2xl shadow-xl p-6 border border-green-100 dark:border-green-900/30 hover:shadow-2xl transition-all duration-300 hover:scale-105">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-1">
@@ -493,20 +457,8 @@ export default function LivraisonPage() {
                   <p className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white truncate">
                     {formatCurrency(stats.totalValue)} {getCurrencySymbol(defaultCurrency)}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                    {selectedDate 
-                      ? `Valeur filtrée: ${formatCurrency(
-                          filteredProducts.reduce((sum, p) => {
-                            const dp = p as DeliveryProduct;
-                            const price = dp.purchase_price || 0;
-                            const qty = dp.delivery_quantity || 0; // UTILISE delivery_quantity
-                            const productValue = price * qty;
-                            const convertedValue = convertToDefaultCurrency(productValue, dp.currency as Currency);
-                            return sum + convertedValue;
-                          }, 0)
-                        )} ${getCurrencySymbol(defaultCurrency)}`
-                      : `en ${defaultCurrency}`
-                    }
+                  <p className="text-xs text-gray-500 mt-2">
+                    {stats.pendingDeliveries ? `${stats.pendingDeliveries} livraison(s) planifiée(s)` : 'valeur en transit'}
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 rounded-xl shadow-md flex-shrink-0">
@@ -519,7 +471,7 @@ export default function LivraisonPage() {
 
         {/* Grid avec produits et calendrier */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className={`${showCalendar ? 'hidden lg:block' : 'block'} lg:col-span-2`}>
+          <div className="lg:col-span-2">
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -527,10 +479,13 @@ export default function LivraisonPage() {
                 ))}
               </div>
             ) : filteredProducts.length === 0 ? (
-              <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">
+              <div className="text-center py-20 bg-gradient-to-br from-white to-orange-50 dark:from-gray-800 dark:to-orange-900/20 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">
                 <div className="max-w-md mx-auto px-4">
-                  <div className="p-6 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/30 dark:to-orange-800/30 rounded-full w-32 h-32 flex items-center justify-center mx-auto mb-6 shadow-xl">
-                    <Truck className="w-16 h-16 text-orange-600 dark:text-orange-400" />
+                  <div className="relative inline-block mb-6">
+                    <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-amber-600 rounded-full blur-xl opacity-20"></div>
+                    <div className="relative p-6 bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/30 rounded-full">
+                      <Truck className="w-16 h-16 text-orange-600 dark:text-orange-400" />
+                    </div>
                   </div>
                   <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
                     {selectedDate ? 'Aucune livraison ce jour' : 'Aucun produit en transit'}
@@ -538,14 +493,14 @@ export default function LivraisonPage() {
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
                     {selectedDate 
                       ? 'Sélectionnez une autre date dans le calendrier.'
-                      : 'Les produits (items) en cours de livraison apparaîtront ici.'
+                      : 'Les produits en cours de livraison apparaîtront ici.'
                     }
                   </p>
                   {selectedDate && (
                     <Button
                       onClick={() => setSelectedDate(null)}
                       variant="outline"
-                      className="mx-auto"
+                      className="mx-auto border-orange-300 dark:border-orange-700"
                     >
                       <X className="w-4 h-4 mr-2" />
                       Voir tous les produits
@@ -558,12 +513,7 @@ export default function LivraisonPage() {
                 {filteredProducts.map((p: DeliveryProduct) => (
                   <ProductCard
                     key={p.id}
-                    // Le composant ProductCard doit utiliser p.delivery_quantity pour afficher la quantité
-                    // Je m'assure que le ProductCard est bien typé pour recevoir un Product
-                    // mais il utilisera p.delivery_quantity si elle existe. 
-                    // Pour le moment, je passe juste 'p' et j'assume que ProductCard gère ce nouveau champ.
-                    // Si ProductCard n'est pas corrigé, il faudra renommer 'delivery_quantity' en 'quantity' ici.
-                    product={{...p, quantity: p.delivery_quantity}} // FORCE la quantité du produit affiché à la quantité d'items en livraison
+                    product={{...p, quantity: p.delivery_quantity}}
                     onEdit={() => openModal(p)}
                     onDelete={() => {}}
                     onClientClick={handleClientClick}
@@ -578,7 +528,7 @@ export default function LivraisonPage() {
             )}
           </div>
 
-          <div className={`${showCalendar ? 'block' : 'hidden lg:block'} lg:col-span-1`}>
+          <div className="lg:col-span-1">
             {loading ? (
               <div className="sticky top-24">
                 <CalendarSkeleton />
@@ -587,8 +537,7 @@ export default function LivraisonPage() {
               <div className="sticky top-24">
                 <DeliveryCalendar
                   clients={allClients}
-                  // Les produits pour le calendrier sont tous les produits qui ont des items en livraison
-                  products={deliveryProducts} 
+                  products={deliveryProducts}
                   onDateSelect={setSelectedDate}
                   selectedDate={selectedDate}
                 />
@@ -601,7 +550,7 @@ export default function LivraisonPage() {
           <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 lg:hidden">
             <Button
               onClick={() => setSelectedDate(null)}
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-2xl rounded-full px-6 py-3 flex items-center gap-2"
+              className="bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white shadow-2xl rounded-full px-6 py-3 flex items-center gap-2"
             >
               <Filter className="w-4 h-4" />
               <span>Filtre actif</span>
@@ -634,7 +583,6 @@ export default function LivraisonPage() {
           />
         )}
 
-        {/* Modal de gestion des items */}
         {selectedProductForItems && (
           <ProductItemsModal
             isOpen={itemsModalOpen}

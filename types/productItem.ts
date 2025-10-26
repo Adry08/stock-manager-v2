@@ -9,10 +9,13 @@ export interface ProductItem {
   status: ProductItemStatus;
   created_at: string;
   updated_at: string;
+  selling_price: number | null;  // 🆕 Ajouté
+  sold_at: string | null;        // 🆕 Ajouté
 }
 
 export interface ProductItemFormData {
   status: ProductItemStatus;
+  selling_price?: number | null;  // 🆕 Ajouté
 }
 
 // Extension du type Database pour inclure product_items
@@ -22,6 +25,8 @@ export interface ProductItemsTable {
     id?: string;
     created_at?: string;
     updated_at?: string;
+    selling_price?: number | null;
+    sold_at?: string | null;
   };
   Update: Partial<Omit<ProductItem, 'id' | 'product_id' | 'created_at'>>;
 }
